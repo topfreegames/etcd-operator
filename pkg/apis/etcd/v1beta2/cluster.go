@@ -178,7 +178,8 @@ type ServicePolicy struct {
 	// etcd cluster.
 	Annotations map[string]string `json:"annotations,omitempty"`
 
-	// Overrides the name of the service created
+	// The name of the service to be created. This field is mandatory if especifying a policy
+	// and is also used as a unique identifier for the services
 	Name string `json:"name" binding:"required"`
 
 	// Overrides the routing service traffic to pods with label keys and

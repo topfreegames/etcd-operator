@@ -15,7 +15,9 @@
 package k8sutil
 
 import (
-	"k8s.io/api/core/v1"
+	"encoding/json"
+	"errors"
+
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	v1 "k8s.io/api/core/v1"
 )
@@ -40,4 +42,22 @@ func applyServicePolicy(service *v1.Service, policy *api.ServicePolicy) {
 	for key, value := range policy.Annotations {
 		service.ObjectMeta.Annotations[key] = value
 	}
+}
+
+func DeepCopyMap(src map[string]*v1.Service, dst map[string]*v1.Service) error {
+	if src == nil {
+		return errors.New("src cannot be nil")
+	}
+	if dst == nil {
+		return errors.New("dst cannot be nil")
+	}
+	jsonStr, err := json.Marshal(src)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(jsonStr, &dst)
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -25,7 +25,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,7 +35,7 @@ var ErrLostQuorum = newFatalError("lost quorum")
 // reconcile reconciles cluster current state to desired state specified by spec.
 // - it tries to reconcile the cluster to desired size.
 // - if the cluster needs for upgrade, it tries to upgrade old member one by one.
-func (c *Cluster) reconcile(ctx context.Context, pods []*v1.Pod) error {
+func (c *Cluster) reconcile(ctx context.Context, pods []*v1.Pod, services map[string]*v1.Service) error {
 	c.logger.Infoln("Start reconciling")
 	defer c.logger.Infoln("Finish reconciling")
 
@@ -44,6 +44,11 @@ func (c *Cluster) reconcile(ctx context.Context, pods []*v1.Pod) error {
 	}()
 
 	sp := c.cluster.Spec
+	if c.cluster.Spec.Services != nil {
+		c.reconcileServices(ctx, services)
+		c.status.SetClusterServiceName(services)
+	}
+
 	running := podsToMemberSet(pods, c.isSecureClient())
 	if !running.IsEqual(c.members) || c.members.Size() != sp.Size {
 		return c.reconcileMembers(ctx, running)
@@ -99,6 +104,48 @@ func (c *Cluster) reconcileMembers(ctx context.Context, running etcdutil.MemberS
 	c.logger.Infof("removing one dead member")
 	// remove dead members that doesn't have any running pods before doing resizing.
 	return c.removeDeadMember(ctx, c.members.Diff(L).PickOne())
+}
+
+func (c *Cluster) diffServices(services map[string]*v1.Service) ([]*api.ServicePolicy, map[string]*v1.Service, error) {
+	newServices := []*api.ServicePolicy{}
+	unknownServices := make(map[string]*v1.Service)
+	k8sutil.DeepCopyMap(services, unknownServices)
+
+	for _, svcPolicy := range c.cluster.Spec.Services {
+		if _, ok := services[svcPolicy.Name]; !ok {
+			newServices = append(newServices, svcPolicy)
+		}
+		delete(unknownServices, svcPolicy.Name)
+	}
+	return newServices, unknownServices, nil
+}
+
+func (c *Cluster) reconcileServices(ctx context.Context, services map[string]*v1.Service) error {
+
+	newServices, unknownServices, err := c.diffServices(services)
+	if err != nil {
+		return err
+	}
+
+	if len(newServices) > 0 {
+		for _, service := range newServices {
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.GetName(), c.cluster.GetNamespace(), c.cluster.AsOwner(), c.isSecureClient(), service)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if len(unknownServices) > 0 {
+		for _, value := range unknownServices {
+			err := c.removeService(ctx, value.GetName())
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (c *Cluster) resize(ctx context.Context) error {

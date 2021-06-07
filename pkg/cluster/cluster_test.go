@@ -15,11 +15,17 @@
 package cluster
 
 import (
+	"context"
 	"testing"
 
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	"github.com/sirupsen/logrus"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // When EtcdCluster update event happens, local object ref should be updated.
@@ -70,5 +76,147 @@ func TestNewLongClusterName(t *testing.T) {
 	clus.SetClusterName("example-etcd-cluster123456789123456789123456789123456789123456")
 	if c := New(Config{}, clus); c != nil {
 		t.Errorf("expect c to be nil")
+	}
+}
+
+func TestPollServices(t *testing.T) {
+	clus := &api.EtcdCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "example-etcd-cluster123456789123456789123456789123456789123456",
+			Namespace: metav1.NamespaceDefault,
+			UID:       "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		services runtime.Object
+		want     int
+	}{
+		{
+			"should return 1 service",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service",
+					Namespace: metav1.NamespaceDefault,
+					Labels: map[string]string{
+						"etcd_cluster": clus.GetName(),
+						"app":          "etcd",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "etcd.database.coreos.com/v1beta2",
+							Kind:       "EtcdCluster",
+							Name:       clus.GetName(),
+							UID:        "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+						},
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: "x.x.x.x",
+				},
+			},
+			1,
+		},
+		{
+			"should skip headless service",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "headless-service",
+					Namespace: metav1.NamespaceDefault,
+					Labels: map[string]string{
+						"etcd_cluster": clus.GetName(),
+						"app":          "etcd",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "etcd.database.coreos.com/v1beta2",
+							Kind:       "EtcdCluster",
+							Name:       clus.GetName(),
+							UID:        "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+						},
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: v1.ClusterIPNone,
+				},
+			},
+			0,
+		},
+		{
+			"should skip service without owner",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "headless-service",
+					Namespace: metav1.NamespaceDefault,
+					Labels: map[string]string{
+						"etcd_cluster": clus.GetName(),
+						"app":          "etcd",
+					},
+					OwnerReferences: []metav1.OwnerReference{},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: "x.x.x.x",
+				},
+			},
+			0,
+		},
+		{
+			"should skip service without owner",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "headless-service",
+					Namespace: metav1.NamespaceDefault,
+					Labels: map[string]string{
+						"etcd_cluster": clus.GetName(),
+						"app":          "etcd",
+					},
+					OwnerReferences: []metav1.OwnerReference{},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: "x.x.x.x",
+				},
+			},
+			0,
+		},
+		{
+			"should skip service with owner different UID",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "headless-service",
+					Namespace: metav1.NamespaceDefault,
+					Labels: map[string]string{
+						"etcd_cluster": clus.GetName(),
+						"app":          "etcd",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "etcd.database.coreos.com/v1beta2",
+							Kind:       "EtcdCluster",
+							Name:       clus.GetName(),
+							UID:        "xxxxxxxx-xxxx-yyyy-xxxx-xxxxxxxxxxxx",
+						},
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: v1.ClusterIPNone,
+				},
+			},
+			0,
+		},
+	}
+	for _, tt := range tests {
+		config := Config{
+			KubeCli: fake.NewSimpleClientset(tt.services),
+		}
+		c := &Cluster{
+			config:  config,
+			cluster: clus,
+			logger:  logrus.WithField("pkg", "test"),
+		}
+		services, _ := c.pollServices(context.Background())
+		if len(services) != tt.want {
+			t.Fatalf("%s: expected: %v, got: %v", tt.name, tt.want, len(services))
+		}
 	}
 }

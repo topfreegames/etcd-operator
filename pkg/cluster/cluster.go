@@ -270,7 +270,15 @@ func (c *Cluster) run(ctx context.Context) {
 					break
 				}
 			}
-			rerr = c.reconcile(ctx, running)
+
+			services, err := c.pollServices(ctx)
+			if err != nil {
+				c.logger.Errorf("fail to poll services: %v", err)
+				reconcileFailed.WithLabelValues("failed to poll services").Inc()
+				continue
+			}
+
+			rerr = c.reconcile(ctx, running, services)
 			if rerr != nil {
 				c.logger.Errorf("failed to reconcile: %v", rerr)
 				break
@@ -317,6 +325,10 @@ func isSpecEqual(s1, s2 api.ClusterSpec) bool {
 	if s1.Size != s2.Size || s1.Paused != s2.Paused || s1.Version != s2.Version {
 		return false
 	}
+	if !reflect.DeepEqual(s1.Services, s2.Services) {
+		return false
+	}
+
 	return true
 }
 
@@ -368,9 +380,9 @@ func (c *Cluster) setupServices(ctx context.Context) error {
 	if c.cluster.Spec.Services != nil {
 		for _, service := range c.cluster.Spec.Services {
 			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service)
-	if err != nil {
-		return err
-	}
+			if err != nil {
+				return err
+			}
 			c.status.ServiceName = append(c.status.ServiceName, service.Name)
 		}
 	} else {
@@ -423,6 +435,18 @@ func (c *Cluster) removePod(ctx context.Context, name string) error {
 	return nil
 }
 
+func (c *Cluster) removeService(ctx context.Context, name string) error {
+	ns := c.cluster.Namespace
+	opts := *metav1.NewDeleteOptions(podTerminationGracePeriod)
+	err := c.config.KubeCli.CoreV1().Services(ns).Delete(ctx, name, opts)
+	if err != nil {
+		if !k8sutil.IsKubernetesResourceNotFoundError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Cluster) pollPods(ctx context.Context) (running, pending []*v1.Pod, err error) {
 	podList, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).List(ctx, k8sutil.ClusterListOpt(c.cluster.Name))
 	if err != nil {
@@ -454,6 +478,33 @@ func (c *Cluster) pollPods(ctx context.Context) (running, pending []*v1.Pod, err
 	}
 
 	return running, pending, nil
+}
+
+func (c *Cluster) pollServices(ctx context.Context) (map[string]*v1.Service, error) {
+	services := make(map[string]*v1.Service)
+	serviceList, err := c.config.KubeCli.CoreV1().Services(c.cluster.GetNamespace()).List(ctx, k8sutil.ClusterListOpt(c.cluster.GetName()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list services: %v", err)
+	}
+
+	for _, service := range serviceList.Items {
+		if service.Spec.ClusterIP == v1.ClusterIPNone {
+			c.logger.Debugf("pollServices: ignore service %v: peer service", service.GetName())
+			continue
+		}
+		if len(service.OwnerReferences) < 1 {
+			c.logger.Debugf("pollServices: ignore service %v: no owner", service.GetName())
+			continue
+		}
+		if service.OwnerReferences[0].UID != c.cluster.UID {
+			c.logger.Debugf("pollServices: ignore service %v: owner (%v) is not %v",
+				service.Name, service.OwnerReferences[0].UID, c.cluster.UID)
+			continue
+		}
+		services[service.Name] = &service
+	}
+
+	return services, nil
 }
 
 func (c *Cluster) updateMemberStatus(running []*v1.Pod) {

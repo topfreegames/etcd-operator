@@ -31,7 +31,7 @@ import (
 	"github.com/pborman/uuid"
 
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -153,7 +153,11 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
-func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, policy *api.ServicePolicy) error {
+func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy) error {
+
+	if len(serviceName) == 0 {
+		return fmt.Errorf("fail to create service: name isn't defined")
+	}
 
 	var EtcdClientPortName string
 	if tls {
@@ -162,23 +166,30 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, clus
 		EtcdClientPortName = "http-client"
 	}
 
-	ports := []v1.ServicePort{{
+	defaultPort := []v1.ServicePort{{
 		Name:       EtcdClientPortName,
 		Port:       EtcdClientPort,
 		TargetPort: intstr.FromInt(EtcdClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-	return createService(ctx, kubecli, ClientServiceName(clusterName, policy), clusterName, ns, "", ports, owner, false, policy)
-}
 
-func ClientServiceName(clusterName string, policy *api.ServicePolicy) string {
-	if policy != nil && len(policy.Name) > 0 {
-		return policy.Name
+	var err error = nil
+	if service != nil {
+		var clientPorts []v1.ServicePort
+		if service.ClientPorts != nil {
+			clientPorts = service.ClientPorts
+		} else {
+			clientPorts = defaultPort
+		}
+		err = createService(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service)
+	} else {
+		err = createService(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, nil)
 	}
-	return clusterName + "-client"
+
+	return err
 }
 
-func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, policy *api.ServicePolicy) error {
+func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool) error {
 
 	var EtcdClientPortName string
 	if tls {
@@ -199,13 +210,18 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 		Protocol:   v1.ProtocolTCP,
 	}}
 
-	return createService(ctx, kubecli, clusterName, clusterName, ns, v1.ClusterIPNone, ports, owner, true, nil)
+	service := &api.ServicePolicy{
+		Type:      v1.ServiceTypeClusterIP,
+		ClusterIP: v1.ClusterIPNone,
+	}
+
+	return createService(ctx, kubecli, clusterName, clusterName, ns, ports, owner, true, service)
 }
 
-func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns, clusterIP string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, policy *api.ServicePolicy) error {
-	svc := newEtcdServiceManifest(svcName, clusterName, clusterIP, ports, publishNotReadyAddresses)
+func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy) error {
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses)
 
-	applyServicePolicy(svc, policy)
+	applyServicePolicy(svc, service)
 	addOwnerRefToObject(svc.GetObjectMeta(), owner)
 	_, err := kubecli.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
@@ -248,7 +264,7 @@ func CreateAndWaitPod(ctx context.Context, kubecli kubernetes.Interface, ns stri
 	return retPod, nil
 }
 
-func newEtcdServiceManifest(svcName, clusterName, clusterIP string, ports []v1.ServicePort, publishNotReadyAddresses bool) *v1.Service {
+func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort, publishNotReadyAddresses bool) *v1.Service {
 	labels := LabelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -259,9 +275,8 @@ func newEtcdServiceManifest(svcName, clusterName, clusterIP string, ports []v1.S
 			},
 		},
 		Spec: v1.ServiceSpec{
-			Ports:     ports,
-			Selector:  labels,
-			ClusterIP: clusterIP,
+			Ports:    ports,
+			Selector: labels,
 			// PublishNotReadyAddresses: publishNotReadyAddresses, // TODO(ckoehn): Activate once TolerateUnreadyEndpointsAnnotation is deprecated.
 		},
 	}
@@ -275,9 +290,9 @@ func AddEtcdVolumeToPod(pod *v1.Pod, pvc *v1.PersistentVolumeClaim, tmpfs bool) 
 		vol.VolumeSource = v1.VolumeSource{
 			PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: pvc.Name},
 		}
-               // Addresses case C from https://github.com/coreos/etcd-operator/blob/master/doc/design/persistent_volumes_etcd_data.md
-               // When PVC is used, make the pod auto recover in case of failure
-               pod.Spec.RestartPolicy = v1.RestartPolicyAlways
+		// Addresses case C from https://github.com/coreos/etcd-operator/blob/master/doc/design/persistent_volumes_etcd_data.md
+		// When PVC is used, make the pod auto recover in case of failure
+		pod.Spec.RestartPolicy = v1.RestartPolicyAlways
 	} else {
 		vol.VolumeSource = v1.VolumeSource{EmptyDir: &v1.EmptyDirVolumeSource{}}
 		if tmpfs {
@@ -323,6 +338,10 @@ func NewEtcdPodPVC(m *etcdutil.Member, pvcSpec v1.PersistentVolumeClaimSpec, clu
 	}
 	addOwnerRefToObject(pvc.GetObjectMeta(), owner)
 	return pvc
+}
+
+func ClientServiceName(clusterName string) string {
+	return clusterName + "-client"
 }
 
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {

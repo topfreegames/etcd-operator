@@ -178,10 +178,16 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		*out = new(PodPolicy)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Service != nil {
-		in, out := &in.Service, &out.Service
-		*out = new(ServicePolicy)
-		(*in).DeepCopyInto(*out)
+	if in.Services != nil {
+		in, out := &in.Services, &out.Services
+		*out = make([]*ServicePolicy, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(ServicePolicy)
+				(*in).DeepCopyInto(*out)
+			}
+		}
 	}
 	if in.TLS != nil {
 		in, out := &in.TLS, &out.TLS
@@ -207,6 +213,11 @@ func (in *ClusterStatus) DeepCopyInto(out *ClusterStatus) {
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]ClusterCondition, len(*in))
+		copy(*out, *in)
+	}
+	if in.ServiceName != nil {
+		in, out := &in.ServiceName, &out.ServiceName
+		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
 	in.Members.DeepCopyInto(&out.Members)
@@ -705,6 +716,20 @@ func (in *ServicePolicy) DeepCopyInto(out *ServicePolicy) {
 		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
+		}
+	}
+	if in.Selector != nil {
+		in, out := &in.Selector, &out.Selector
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.ClientPorts != nil {
+		in, out := &in.ClientPorts, &out.ClientPorts
+		*out = make([]v1.ServicePort, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	return

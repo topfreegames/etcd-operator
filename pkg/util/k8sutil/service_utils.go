@@ -17,11 +17,20 @@ package k8sutil
 import (
 	"k8s.io/api/core/v1"
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	v1 "k8s.io/api/core/v1"
 )
 
 func applyServicePolicy(service *v1.Service, policy *api.ServicePolicy) {
 	if policy == nil {
 		return
+	}
+
+	if len(policy.Type) != 0 {
+		service.Spec.Type = policy.Type
+	}
+
+	if len(policy.ClusterIP) != 0 {
+		service.Spec.ClusterIP = policy.ClusterIP
 	}
 
 	if len(policy.Selector) != 0 {

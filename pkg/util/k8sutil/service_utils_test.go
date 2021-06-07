@@ -17,79 +17,80 @@ package k8sutil
 import (
 	"testing"
 
-  "k8s.io/api/core/v1"
-  metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"reflect"
+
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
-  "reflect"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestApplyNilServicePolicy(t *testing.T) {
-  svc := &v1.Service{
-              ObjectMeta: metav1.ObjectMeta{
-                Name: "service",
-                Annotations: map[string]string{},
-                },
-              }
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "service",
+			Annotations: map[string]string{},
+		},
+	}
 	var policy *api.ServicePolicy = nil
-  expected := svc.GetObjectMeta().GetAnnotations()
+	expected := svc.GetObjectMeta().GetAnnotations()
 	applyServicePolicy(svc, policy)
-  actual := svc.GetObjectMeta().GetAnnotations()
+	actual := svc.GetObjectMeta().GetAnnotations()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("expect expected=%v, got=%v", expected, actual)
 	}
 }
 
 func TestApplyEmptyServicePolicy(t *testing.T) {
-  svc := &v1.Service{
-              ObjectMeta: metav1.ObjectMeta{
-                Name: "service",
-                Annotations: map[string]string{},
-                },
-              }
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "service",
+			Annotations: map[string]string{},
+		},
+	}
 	policy := &api.ServicePolicy{}
-  expected := svc.GetObjectMeta().GetAnnotations()
+	expected := svc.GetObjectMeta().GetAnnotations()
 	applyServicePolicy(svc, policy)
-  actual := svc.GetObjectMeta().GetAnnotations()
+	actual := svc.GetObjectMeta().GetAnnotations()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("expect expected=%v, got=%v", expected, actual)
 	}
 }
 
 func TestApplyEmptyAnnotationsServicePolicy(t *testing.T) {
-  svc := &v1.Service{
-              ObjectMeta: metav1.ObjectMeta{
-                Name: "service",
-                Annotations: map[string]string{},
-                },
-              }
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "service",
+			Annotations: map[string]string{},
+		},
+	}
 	policy := &api.ServicePolicy{
 		Annotations: map[string]string{},
 	}
-  expected := svc.GetObjectMeta().GetAnnotations()
+	expected := svc.GetObjectMeta().GetAnnotations()
 	applyServicePolicy(svc, policy)
-  actual := svc.GetObjectMeta().GetAnnotations()
+	actual := svc.GetObjectMeta().GetAnnotations()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("expect expected=%v, got=%v", expected, actual)
 	}
 }
 
 func TestApplyServicePolicyWithAnnotation(t *testing.T) {
-  svc := &v1.Service{
-              ObjectMeta: metav1.ObjectMeta{
-                Name: "service",
-                Annotations: map[string]string{},
-                },
-              }
-  annotations := map[string]string{
-    "key1": "value2",
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "service",
+			Annotations: map[string]string{},
+		},
+	}
+	annotations := map[string]string{
+		"key1": "value2",
 		"key2": "value2",
-  }
+	}
 
 	policy := &api.ServicePolicy{
-    Annotations: annotations,
-  }
+		Annotations: annotations,
+	}
 	applyServicePolicy(svc, policy)
-  actual := svc.GetObjectMeta().GetAnnotations()
+	actual := svc.GetObjectMeta().GetAnnotations()
 	if !reflect.DeepEqual(annotations, actual) {
 		t.Errorf("expect expected=%v, got=%v", annotations, actual)
 	}
@@ -105,7 +106,7 @@ func TestApplyServicePolicyEmptySelector(t *testing.T) {
 			Name: "service",
 		},
 		Spec: v1.ServiceSpec{
-			Selector:  selector,
+			Selector: selector,
 		},
 	}
 	policy := &api.ServicePolicy{
@@ -128,7 +129,7 @@ func TestApplyServicePolicyWithSelector(t *testing.T) {
 			Name: "service",
 		},
 		Spec: v1.ServiceSpec{
-			Selector:  selector,
+			Selector: selector,
 		},
 	}
 	customSelector := map[string]string{
@@ -143,5 +144,33 @@ func TestApplyServicePolicyWithSelector(t *testing.T) {
 	actual := svc.Spec.Selector
 	if !reflect.DeepEqual(customSelector, actual) {
 		t.Errorf("expect expected=%v, got=%v", selector, actual)
+	}
+}
+
+func TestApplyServicePolicyWithClusterIP(t *testing.T) {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "service",
+		},
+		Spec: v1.ServiceSpec{},
+	}
+
+	serviceType := v1.ServiceTypeClusterIP
+
+	clusterIP := "10.x.x.x"
+
+	policy := &api.ServicePolicy{
+		Type:      serviceType,
+		ClusterIP: clusterIP,
+	}
+	applyServicePolicy(svc, policy)
+	actualType := svc.Spec.Type
+	actualClusterIP := svc.Spec.Type
+	if !reflect.DeepEqual(serviceType, actualType) {
+		t.Errorf("expect expected=%v, got=%v", serviceType, actualType)
+	}
+
+	if !reflect.DeepEqual(clusterIP, actualClusterIP) {
+		t.Errorf("expect expected=%v, got=%v", clusterIP, actualClusterIP)
 	}
 }

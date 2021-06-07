@@ -32,7 +32,7 @@ import (
 
 	"github.com/pborman/uuid"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -42,7 +42,7 @@ import (
 var (
 	reconcileInterval         = 8 * time.Second
 	podTerminationGracePeriod = int64(5)
-	errAllPodsDead = newFatalError("all etcd pods are dead.")
+	errAllPodsDead            = newFatalError("all etcd pods are dead.")
 )
 
 type clusterEventType string
@@ -204,7 +204,7 @@ func (c *Cluster) run(ctx context.Context) {
 	if err := c.setupServices(ctx); err != nil {
 		c.logger.Errorf("fail to setup etcd services: %v", err)
 	}
-	c.status.ServiceName = k8sutil.ClientServiceName(c.cluster.Name, c.cluster.Spec.Service)
+
 	c.status.ClientPort = k8sutil.EtcdClientPort
 
 	c.status.SetPhase(api.ClusterPhaseRunning)
@@ -365,12 +365,23 @@ func (c *Cluster) Update(cl *api.EtcdCluster) {
 }
 
 func (c *Cluster) setupServices(ctx context.Context) error {
-	err := k8sutil.CreateClientService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), c.cluster.Spec.Service)
+	if c.cluster.Spec.Services != nil {
+		for _, service := range c.cluster.Spec.Services {
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service)
 	if err != nil {
 		return err
 	}
+			c.status.ServiceName = append(c.status.ServiceName, service.Name)
+		}
+	} else {
+		err := k8sutil.CreateClientService(ctx, c.config.KubeCli, k8sutil.ClientServiceName(c.cluster.Name), c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), nil)
+		if err != nil {
+			return err
+		}
+		c.status.ServiceName = append(c.status.ServiceName, k8sutil.ClientServiceName(c.cluster.Name))
+	}
 
-	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), c.cluster.Spec.Service)
+	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient())
 }
 
 func (c *Cluster) isPodPVEnabled() bool {

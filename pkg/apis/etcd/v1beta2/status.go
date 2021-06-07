@@ -52,7 +52,7 @@ type ClusterStatus struct {
 	Size int `json:"size"`
 
 	// ServiceName is the LB service for accessing etcd nodes.
-	ServiceName string `json:"serviceName,omitempty"`
+	ServiceName []string `json:"serviceName,omitempty"`
 
 	// ClientPort is the port for etcd client to access.
 	// It's the same on client LB service and etcd nodes.
@@ -177,6 +177,14 @@ func (cs *ClusterStatus) setClusterCondition(c ClusterCondition) {
 	} else {
 		cs.Conditions = append(cs.Conditions, c)
 	}
+}
+
+func (cs *ClusterStatus) SetClusterServiceName(s map[string]*v1.Service) {
+	serviceNames := []string{}
+	for serviceName := range s {
+		serviceNames = append(serviceNames, serviceName)
+	}
+	cs.ServiceName = serviceNames
 }
 
 func getClusterCondition(status *ClusterStatus, t ClusterConditionType) (int, *ClusterCondition) {

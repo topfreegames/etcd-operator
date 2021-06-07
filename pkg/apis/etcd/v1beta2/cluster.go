@@ -18,7 +18,7 @@ import (
 	"errors"
 	"strings"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -98,7 +98,7 @@ type ClusterSpec struct {
 	Pod *PodPolicy `json:"pod,omitempty"`
 
 	// Service defines the policy to create etcd services
-	Service *ServicePolicy `json:"service,omitempty"`
+	Services []*ServicePolicy `json:"services,omitempty"`
 
 	// etcd cluster TLS configuration
 	TLS *TLSPolicy `json:"TLS,omitempty"`
@@ -172,21 +172,33 @@ type PodPolicy struct {
 	Tmpfs bool `json:"tmpfs,omitempty"`
 }
 
-// ServicePolicy defines the policy to create pod for the etcd container.
+// ServicePolicy defines the policy to create services for the etcd container.
 type ServicePolicy struct {
 	// Annotations specifies the annotations to attach to services the operator creates for the
 	// etcd cluster.
 	Annotations map[string]string `json:"annotations,omitempty"`
 
 	// Overrides the name of the service created
-	// +optional
-	Name string `json:"name,omitempty"`
+	Name string `json:"name" binding:"required"`
 
 	// Overrides the routing service traffic to pods with label keys and
 	// values matching this selector.
 	// More info: https://kubernetes.io/docs/concepts/services-networking/service/
 	// +optional
 	Selector map[string]string `json:"selector,omitempty"`
+
+	// type determines how the Service is exposed. Defaults to ClusterIP. Valid
+	// options are ExternalName, ClusterIP, NodePort, and LoadBalancer.
+	// +optional:
+	Type v1.ServiceType `json:"type,omitempty"`
+
+	// clusterIP is the IP address of the service and is usually assigned randomly.
+	// +optional
+	ClusterIP string `json:"clusterIP,omitempty"`
+
+	// The list of ports that are exposed by this service.
+	// +optional
+	ClientPorts []v1.ServicePort `json:"ports,omitempty"`
 }
 
 // TODO: move this to initializer

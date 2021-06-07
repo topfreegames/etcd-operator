@@ -47,39 +47,3 @@ func TestSetBusyboxImageName(t *testing.T) {
 		t.Errorf("expect image=%s, get=%s", expected, image)
 	}
 }
-
-func TestClientServiceNameNilPolicy(t *testing.T) {
-	clusterName := "clusterName"
-	var policy *api.ServicePolicy = nil
-
-	svcName := ClientServiceName(clusterName, policy)
-	expected := "clusterName-client"
-	if svcName != expected {
-		t.Errorf("expect svcName=%s, got=%s", expected, svcName)
-	}
-}
-
-func TestClientServiceNameWithEmptyNamePolicy(t *testing.T) {
-	clusterName := "clusterName"
-	policy := &api.ServicePolicy{
-		Name: "",
-	}
-	svcName := ClientServiceName(clusterName, policy)
-	expected := "clusterName-client"
-	if svcName != expected {
-		t.Errorf("expect svcName=%s, got=%s", expected, svcName)
-	}
-}
-
-func TestClientServiceNameWithNamePolicy(t *testing.T) {
-	clusterName := "clusterName"
-	policy := &api.ServicePolicy{
-		Name: "clusterNameCustom",
-	}
-
-	svcName := ClientServiceName(clusterName, policy)
-	expected := policy.Name
-	if svcName != expected {
-		t.Errorf("expect svcName=%s, got=%s", expected, svcName)
-	}
-}

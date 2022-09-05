@@ -21,7 +21,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,8 +73,6 @@ const (
 	// to reverse DNS lookup its IP. The default behavior is to wait forever and has a value of 0.
 	defaultDNSTimeout = int64(0)
 )
-
-const TolerateUnreadyEndpointsAnnotation = "service.alpha.kubernetes.io/tolerate-unready-endpoints"
 
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
@@ -270,14 +267,11 @@ func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   svcName,
 			Labels: labels,
-			Annotations: map[string]string{
-				TolerateUnreadyEndpointsAnnotation: strconv.FormatBool(publishNotReadyAddresses),
-			},
 		},
 		Spec: v1.ServiceSpec{
-			Ports:    ports,
-			Selector: labels,
-			// PublishNotReadyAddresses: publishNotReadyAddresses, // TODO(ckoehn): Activate once TolerateUnreadyEndpointsAnnotation is deprecated.
+			Ports:                    ports,
+			Selector:                 labels,
+			PublishNotReadyAddresses: publishNotReadyAddresses,
 		},
 	}
 	return svc

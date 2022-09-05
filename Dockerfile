@@ -5,15 +5,17 @@ ARG VERSION=dev
 ARG REVISION=dev
 ARG CREATED=dev
 
-COPY vendor /go/src/
 COPY cmd cmd
 COPY pkg pkg
 COPY version version
+COPY go.mod go.sum ./
 
 # Produce a static / reproducible build
 ENV CGO_ENABLED=0
 ENV GOOS=linux
 ENV GOARCH=amd64
+RUN go mod tidy && \
+    go mod vendor
 RUN go build --ldflags "-w -s -X 'github.com/coreos/etcd-operator/version.GitSHA=$REVISION'" -o /usr/local/bin/etcd-operator github.com/coreos/etcd-operator/cmd/operator
 RUN go build --ldflags "-w -s -X 'github.com/coreos/etcd-operator/version.GitSHA=$REVISION'" -o /usr/local/bin/etcd-backup-operator github.com/coreos/etcd-operator/cmd/backup-operator
 RUN go build --ldflags "-w -s -X 'github.com/coreos/etcd-operator/version.GitSHA=$REVISION'" -o /usr/local/bin/etcd-restore-operator github.com/coreos/etcd-operator/cmd/restore-operator

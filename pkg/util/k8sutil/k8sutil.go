@@ -265,8 +265,9 @@ func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort,
 	labels := LabelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   svcName,
-			Labels: labels,
+			Name:        svcName,
+			Labels:      labels,
+			Annotations: map[string]string{},
 		},
 		Spec: v1.ServiceSpec{
 			Ports:                    ports,

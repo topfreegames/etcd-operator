@@ -102,6 +102,9 @@ type ClusterSpec struct {
 
 	// etcd cluster TLS configuration
 	TLS *TLSPolicy `json:"TLS,omitempty"`
+
+	ClusteringMode string `json:"clusteringMode,omitempty"`
+	ClusterToken string `json:"clusterToken,omitempty"`
 }
 
 // PodPolicy defines the policy to create pod for the etcd container.

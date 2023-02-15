@@ -73,7 +73,7 @@ const (
 	// to reverse DNS lookup its IP. The default behavior is to wait forever and has a value of 0.
 	defaultDNSTimeout = int64(0)
 
-	// discoveryEndpoint is the endpoint to be used for discovery service. The default is the public etcd 
+	// discoveryEndpoint is the endpoint to be used for discovery service. The default is the public etcd
 	// service endpoint
 	discoveryEndpoint = "https://discovery.etcd.io"
 )
@@ -351,18 +351,18 @@ func ClientServiceName(clusterName string) string {
 	return clusterName + "-client"
 }
 
-func setupInitialEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
+func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
 	if clusteringMode == "distributed" {
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
-		"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
-		"--discovery=%s/%s",
-		dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), discoveryEndpoint, clusterToken)
+			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
+			"--discovery=%s/%s",
+			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), discoveryEndpoint, clusterToken)
 		return command, nil
 	} else {
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
-		"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
-		"--initial-cluster=%s --initial-cluster-state=%s",
-		dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), initialCluster, clusterState)
+			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
+			"--initial-cluster=%s --initial-cluster-state=%s",
+			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), initialCluster, clusterState)
 		if clusterState == "new" {
 			command = fmt.Sprintf("%s --initial-cluster-token=%s", command, clusterToken)
 		}
@@ -371,7 +371,7 @@ func setupInitialEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster 
 }
 
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
-	command, err := setupInitialEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode)
+	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode)
 	if err != nil {
 		return nil, err
 	}

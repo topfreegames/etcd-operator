@@ -1,6 +1,5 @@
 name: Testing E2E
-on:
-  push:
+on: [push, pull_request]
 jobs:
   prepare:
     name: Prepare

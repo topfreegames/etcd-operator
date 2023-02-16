@@ -99,12 +99,15 @@ func TestEtcdCommandExistingLocalCluster(t *testing.T) {
 
 	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember2, strings.Join(memberSetURLs, ","), clusterState, token, "")
 
-	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test-2 --initial-advertise-peer-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2380 " +
-		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2379 " +
-		"--initial-cluster=etcd-test-1=http://etcd-test-1.etcd-test.etcd.svc.local:2380,etcd-test-2=http://etcd-test-2.etcd-test.etcd.svc.local:2380 --initial-cluster-state=existing"
+	commandBeforeClusterSet := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test-2 --initial-advertise-peer-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2380 " +
+		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2379 "
+	commandClusterSet1 := "--initial-cluster=etcd-test-1=http://etcd-test-1.etcd-test.etcd.svc.local:2380,etcd-test-2=http://etcd-test-2.etcd-test.etcd.svc.local:2380 --initial-cluster-state=existing"
+	commandClusterSet2 := "--initial-cluster=etcd-test-2=http://etcd-test-2.etcd-test.etcd.svc.local:2380,etcd-test-1=http://etcd-test-1.etcd-test.etcd.svc.local:2380 --initial-cluster-state=existing"
+	expectedCommand1 := commandBeforeClusterSet+commandClusterSet1
+	expectedCommand2 := commandBeforeClusterSet+commandClusterSet2
 
-	if initialEtcdCommand != expectedCommand {
-		t.Errorf("expected command=%s, got=%s", expectedCommand, initialEtcdCommand)
+	if initialEtcdCommand != expectedCommand1 && initialEtcdCommand != expectedCommand2{
+		t.Errorf("wrong etcd command, got=%s", initialEtcdCommand)
 	}
 }
 

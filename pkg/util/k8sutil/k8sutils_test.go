@@ -146,7 +146,7 @@ func TestEtcdCommandDistributedCluster(t *testing.T) {
 	memberSet := etcdutil.NewMemberSet(etcdMember).PeerURLPairs()
 	clusterState := "new"
 	clusterToken := "token"
-	clusteringMode := "distributed"
+	clusteringMode := "discovery"
 
 	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, clusterToken, clusteringMode)
 
@@ -176,7 +176,7 @@ func TestCreateTokenLocalCluster(t *testing.T) {
 func TestCreateTokenDistributedCluster(t *testing.T) {
 	clusterSpec := &api.ClusterSpec{
 		Size:           1,
-		ClusteringMode: "distributed",
+		ClusteringMode: "discovery",
 		ClusterToken:   "testtoken",
 	}
 

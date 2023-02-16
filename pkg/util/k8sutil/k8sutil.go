@@ -311,7 +311,7 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 }
 
 func createToken(clusterSpec api.ClusterSpec) string {
-	if clusterSpec.ClusteringMode == "distributed" {
+	if clusterSpec.ClusteringMode == "discovery" {
 		return clusterSpec.ClusterToken
 	} else {
 		return uuid.New()
@@ -352,7 +352,7 @@ func ClientServiceName(clusterName string) string {
 }
 
 func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
-	if clusteringMode == "distributed" {
+	if clusteringMode == "discovery" {
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
 			"--discovery=%s/%s",

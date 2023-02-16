@@ -17,6 +17,7 @@ package k8sutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -77,6 +78,8 @@ const (
 	// service endpoint
 	discoveryEndpoint = "https://discovery.etcd.io"
 )
+
+var ErrDiscoveryTokenNotProvided = errors.New("cluster token not provided, you must provide a token when clustering mode is discovery")
 
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
@@ -310,18 +313,25 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func createToken(clusterSpec api.ClusterSpec) string {
+func createToken(clusterSpec api.ClusterSpec) (string, error) {
 	if clusterSpec.ClusteringMode == "discovery" {
-		return clusterSpec.ClusterToken
+		if clusterSpec.ClusterToken == "" {
+			return "", ErrDiscoveryTokenNotProvided
+		} else {
+			return clusterSpec.ClusterToken, nil
+		}
 	} else {
-		return uuid.New()
+		return uuid.New(), nil
 	}
 }
 
 // NewSeedMemberPod returns a Pod manifest for a seed member.
 // It's special that it has new token, and might need recovery init containers
 func NewSeedMemberPod(ctx context.Context, kubecli kubernetes.Interface, clusterName, clusterNamespace string, ms etcdutil.MemberSet, m *etcdutil.Member, cs api.ClusterSpec, owner metav1.OwnerReference, backupURL *url.URL) (*v1.Pod, error) {
-	token := createToken(cs)
+	token, err := createToken(cs)
+	if err != nil {
+		return nil, err
+	}
 	pod, err := newEtcdPod(ctx, kubecli, m, ms.PeerURLPairs(), clusterName, clusterNamespace, "new", token, cs)
 	// TODO: PVC datadir support for restore process
 	AddEtcdVolumeToPod(pod, nil, cs.Pod.Tmpfs)

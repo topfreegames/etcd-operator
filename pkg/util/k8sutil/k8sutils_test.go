@@ -134,7 +134,7 @@ func TestEtcdCommandInvalidClusterMode(t *testing.T) {
 	}
 }
 
-func TestEtcdCommandDistributedCluster(t *testing.T) {
+func TestEtcdCommandDiscoveryCluster(t *testing.T) {
 	dataDir := "/var/etcd/data"
 	etcdMember := &etcdutil.Member{
 		Name:          "etcd-test",
@@ -166,10 +166,37 @@ func TestCreateTokenLocalCluster(t *testing.T) {
 		ClusterToken:   "testtoken",
 	}
 
-	token := createToken(*clusterSpec)
+	token, _ := createToken(*clusterSpec)
 
 	if token == "testtoken" {
 		t.Errorf("token should be a randon uuid, instead got %s", token)
+	}
+}
+
+func TestCreateTokenDiscoveryClusterNoTokenSent(t *testing.T) {
+	clusterSpec := &api.ClusterSpec{
+		Size:           1,
+		ClusteringMode: "discovery",
+	}
+
+	_, err := createToken(*clusterSpec)
+
+	if err == nil {
+		t.Errorf("Expected an error to be thrown when discovery mode on and no token is set")
+	}
+}
+
+func TestCreateTokenDiscoveryClusterTokenEmpty(t *testing.T) {
+	clusterSpec := &api.ClusterSpec{
+		Size:           1,
+		ClusteringMode: "discovery",
+		ClusterToken: "",
+	}
+
+	_, err := createToken(*clusterSpec)
+
+	if err == nil {
+		t.Errorf("Expected an error to be thrown when discovery mode on and no token is set")
 	}
 }
 
@@ -180,7 +207,7 @@ func TestCreateTokenDistributedCluster(t *testing.T) {
 		ClusterToken:   "testtoken",
 	}
 
-	token := createToken(*clusterSpec)
+	token, _ := createToken(*clusterSpec)
 
 	if token != "testtoken" {
 		t.Errorf("expected token=%s, got=%s", clusterSpec.ClusterToken, token)

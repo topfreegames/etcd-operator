@@ -21,10 +21,12 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Prepare e2e image
-        run: |
-          hack/build/e2e/docker_push
-        env:
-          TEST_IMAGE: docker.pkg.github.com/cbws/etcd-operator/etcd-operator-e2e:${{github.sha}}
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          context: .
+          file: test/pod/Dockerfile
+          tags: docker.pkg.github.com/cbws/etcd-operator/etcd-operator-e2e:${{github.sha}}
 
       - name: Prepare operator image
         run: |

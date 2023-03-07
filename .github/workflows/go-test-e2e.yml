@@ -31,6 +31,7 @@ jobs:
         with:
           push: true
           context: .
+          platforms: "linux/amd64"
           file: test/pod/Dockerfile
           tags: docker.pkg.github.com/cbws/etcd-operator/etcd-operator-e2e:${{github.sha}}
 

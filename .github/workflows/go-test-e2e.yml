@@ -33,7 +33,7 @@ jobs:
           context: .
           platforms: "linux/amd64"
           file: test/pod/Dockerfile
-          tags: tfgco/etcd-operator/etcd-operator-e2e:${{github.sha}}
+          tags: tfgco/etcd-operator-e2e:${{github.sha}}
 
       - name: Prepare operator image
         run: |
@@ -42,7 +42,7 @@ jobs:
           hack/build/restore-operator/build
           IMAGE=${OPERATOR_IMAGE} hack/build/docker_push
         env:
-          OPERATOR_IMAGE: tfgco/etcd-operator/operator:${{github.sha}}
+          OPERATOR_IMAGE: tfgco/etcd-operator:${{github.sha}}
   test-e2e:
     name: E2E
     runs-on: ubuntu-latest

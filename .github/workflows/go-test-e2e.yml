@@ -31,18 +31,23 @@ jobs:
         with:
           push: true
           context: .
-          platforms: "linux/amd64"
           file: test/pod/Dockerfile
           tags: tfgco/etcd-operator-e2e:${{github.sha}}
-
+      
       - name: Prepare operator image
         run: |
           hack/build/operator/build
           hack/build/backup-operator/build
           hack/build/restore-operator/build
-          IMAGE=${OPERATOR_IMAGE} hack/build/docker_push
-        env:
-          OPERATOR_IMAGE: tfgco/etcd-operator:${{github.sha}}
+      
+      - name: Prepare operator image
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          context: .
+          file: hack/build/Dockerfile
+          tags: tfgco/etcd-operator:${{github.sha}}
+
   test-e2e:
     name: E2E
     runs-on: ubuntu-latest
@@ -57,12 +62,17 @@ jobs:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2.3.4
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: KinD (Kubernetes in Docker) Action
         uses: engineerd/setup-kind@v0.5.0
-
+      
       - name: Test
         run: |
-          docker login docker.pkg.github.com -u marlinc -p "${GITHUB_PACKAGE_REGISTRY_TOKEN}"
           docker pull $TEST_IMAGE
           docker pull $OPERATOR_IMAGE
           export KUBECONFIG="${HOME}/.kube/config"
@@ -71,13 +81,13 @@ jobs:
           hack/ci/run_e2e
         env:
           GITHUB_PACKAGE_REGISTRY_TOKEN: ${{ secrets.GITHUB_PACKAGE_REGISTRY_TOKEN }}
-          OPERATOR_IMAGE: docker.pkg.github.com/cbws/etcd-operator/operator:${{github.sha}}
+          OPERATOR_IMAGE: tfgco/etcd-operator:${{github.sha}}
           TEST_AWS_SECRET: na
           TEST_S3_BUCKET: na
           TEST_NAMESPACE: default
           BUILD_IMAGE: false
           BUILD_E2E: false
-          TEST_IMAGE: docker.pkg.github.com/cbws/etcd-operator/etcd-operator-e2e:${{github.sha}}
+          TEST_IMAGE: tfgco/etcd-operator-e2e:${{github.sha}}
           PASSES: e2e
 
       - name: Show logs

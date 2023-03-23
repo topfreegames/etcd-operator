@@ -17,6 +17,7 @@ package k8sutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -72,7 +73,13 @@ const (
 	// defaultDNSTimeout is the default maximum allowed time for the init container of the etcd pod
 	// to reverse DNS lookup its IP. The default behavior is to wait forever and has a value of 0.
 	defaultDNSTimeout = int64(0)
+
+	// discoveryEndpoint is the endpoint to be used for discovery service. The default is the public etcd
+	// service endpoint
+	discoveryEndpoint = "https://discovery.etcd.io"
 )
+
+var ErrDiscoveryTokenNotProvided = errors.New("cluster token not provided, you must provide a token when clustering mode is discovery")
 
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
@@ -306,10 +313,25 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
+func createToken(clusterSpec api.ClusterSpec) (string, error) {
+	if clusterSpec.ClusteringMode == "discovery" {
+		if clusterSpec.ClusterToken == "" {
+			return "", ErrDiscoveryTokenNotProvided
+		} else {
+			return clusterSpec.ClusterToken, nil
+		}
+	} else {
+		return uuid.New(), nil
+	}
+}
+
 // NewSeedMemberPod returns a Pod manifest for a seed member.
 // It's special that it has new token, and might need recovery init containers
 func NewSeedMemberPod(ctx context.Context, kubecli kubernetes.Interface, clusterName, clusterNamespace string, ms etcdutil.MemberSet, m *etcdutil.Member, cs api.ClusterSpec, owner metav1.OwnerReference, backupURL *url.URL) (*v1.Pod, error) {
-	token := uuid.New()
+	token, err := createToken(cs)
+	if err != nil {
+		return nil, err
+	}
 	pod, err := newEtcdPod(ctx, kubecli, m, ms.PeerURLPairs(), clusterName, clusterNamespace, "new", token, cs)
 	// TODO: PVC datadir support for restore process
 	AddEtcdVolumeToPod(pod, nil, cs.Pod.Tmpfs)
@@ -339,20 +361,39 @@ func ClientServiceName(clusterName string) string {
 	return clusterName + "-client"
 }
 
+func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
+	if clusteringMode == "discovery" {
+		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
+			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
+			"--discovery=%s/%s",
+			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), discoveryEndpoint, clusterToken)
+		return command, nil
+	} else {
+		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
+			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
+			"--initial-cluster=%s --initial-cluster-state=%s",
+			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), initialCluster, clusterState)
+		if clusterState == "new" {
+			command = fmt.Sprintf("%s --initial-cluster-token=%s", command, clusterToken)
+		}
+		return command, nil
+	}
+}
+
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
-	commands := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
-		"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
-		"--initial-cluster=%s --initial-cluster-state=%s",
-		dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), strings.Join(initialCluster, ","), state)
+	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode)
+	if err != nil {
+		return nil, err
+	}
 	if m.SecurePeer {
 		secret, err := kubecli.CoreV1().Secrets(clusterNamespace).Get(ctx, cs.TLS.Static.Member.PeerSecret, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		if secret.Type == v1.SecretTypeTLS {
-			commands += fmt.Sprintf(" --peer-client-cert-auth=true --peer-trusted-ca-file=%[1]s/ca.crt --peer-cert-file=%[1]s/tls.crt --peer-key-file=%[1]s/tls.key", peerTLSDir)
+			command += fmt.Sprintf(" --peer-client-cert-auth=true --peer-trusted-ca-file=%[1]s/ca.crt --peer-cert-file=%[1]s/tls.crt --peer-key-file=%[1]s/tls.key", peerTLSDir)
 		} else {
-			commands += fmt.Sprintf(" --peer-client-cert-auth=true --peer-trusted-ca-file=%[1]s/peer-ca.crt --peer-cert-file=%[1]s/peer.crt --peer-key-file=%[1]s/peer.key", peerTLSDir)
+			command += fmt.Sprintf(" --peer-client-cert-auth=true --peer-trusted-ca-file=%[1]s/peer-ca.crt --peer-cert-file=%[1]s/peer.crt --peer-key-file=%[1]s/peer.key", peerTLSDir)
 		}
 	}
 	if m.SecureClient {
@@ -361,13 +402,10 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 			return nil, err
 		}
 		if secret.Type == v1.SecretTypeTLS {
-			commands += fmt.Sprintf(" --client-cert-auth=true --trusted-ca-file=%[1]s/ca.crt --cert-file=%[1]s/tls.crt --key-file=%[1]s/tls.key", serverTLSDir)
+			command += fmt.Sprintf(" --client-cert-auth=true --trusted-ca-file=%[1]s/ca.crt --cert-file=%[1]s/tls.crt --key-file=%[1]s/tls.key", serverTLSDir)
 		} else {
-			commands += fmt.Sprintf(" --client-cert-auth=true --trusted-ca-file=%[1]s/server-ca.crt --cert-file=%[1]s/server.crt --key-file=%[1]s/server.key", serverTLSDir)
+			command += fmt.Sprintf(" --client-cert-auth=true --trusted-ca-file=%[1]s/server-ca.crt --cert-file=%[1]s/server.crt --key-file=%[1]s/server.key", serverTLSDir)
 		}
-	}
-	if state == "new" {
-		commands = fmt.Sprintf("%s --initial-cluster-token=%s", commands, token)
 	}
 
 	labels := map[string]string{
@@ -393,7 +431,7 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 	readinessProbe.FailureThreshold = 3
 
 	container := containerWithProbes(
-		etcdContainer(strings.Split(commands, " "), cs.Repository, cs.Version),
+		etcdContainer(strings.Split(command, " "), cs.Repository, cs.Version),
 		livenessProbe,
 		readinessProbe)
 

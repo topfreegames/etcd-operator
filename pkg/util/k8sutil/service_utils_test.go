@@ -165,7 +165,7 @@ func TestApplyServicePolicyWithClusterIP(t *testing.T) {
 	}
 	applyServicePolicy(svc, policy)
 	actualType := svc.Spec.Type
-	actualClusterIP := svc.Spec.Type
+	actualClusterIP := svc.Spec.ClusterIP
 	if !reflect.DeepEqual(serviceType, actualType) {
 		t.Errorf("expect expected=%v, got=%v", serviceType, actualType)
 	}

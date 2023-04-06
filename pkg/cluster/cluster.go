@@ -30,7 +30,6 @@ import (
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
 
-	"github.com/pborman/uuid"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -404,7 +403,12 @@ func (c *Cluster) isPodPVEnabled() bool {
 }
 
 func (c *Cluster) createPod(ctx context.Context, members etcdutil.MemberSet, m *etcdutil.Member, state string) error {
-	pod, err := k8sutil.NewEtcdPod(ctx, c.config.KubeCli, m, members.PeerURLPairs(), c.cluster.Name, c.cluster.Namespace, state, uuid.New(), c.cluster.Spec, c.cluster.AsOwner())
+	token, err := k8sutil.CreateToken(c.cluster.Spec)
+	if err != nil {
+		return err
+	}
+	
+	pod, err := k8sutil.NewEtcdPod(ctx, c.config.KubeCli, m, members.PeerURLPairs(), c.cluster.Name, c.cluster.Namespace, state, token, c.cluster.Spec, c.cluster.AsOwner())
 	if c.isPodPVEnabled() {
 		pvc := k8sutil.NewEtcdPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
 		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(ctx, pvc, metav1.CreateOptions{})

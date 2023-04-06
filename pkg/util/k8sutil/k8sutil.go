@@ -313,7 +313,7 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 	o.SetOwnerReferences(append(o.GetOwnerReferences(), r))
 }
 
-func createToken(clusterSpec api.ClusterSpec) (string, error) {
+func CreateToken(clusterSpec api.ClusterSpec) (string, error) {
 	if clusterSpec.ClusteringMode == "discovery" {
 		if clusterSpec.ClusterToken == "" {
 			return "", ErrDiscoveryTokenNotProvided
@@ -328,7 +328,7 @@ func createToken(clusterSpec api.ClusterSpec) (string, error) {
 // NewSeedMemberPod returns a Pod manifest for a seed member.
 // It's special that it has new token, and might need recovery init containers
 func NewSeedMemberPod(ctx context.Context, kubecli kubernetes.Interface, clusterName, clusterNamespace string, ms etcdutil.MemberSet, m *etcdutil.Member, cs api.ClusterSpec, owner metav1.OwnerReference, backupURL *url.URL) (*v1.Pod, error) {
-	token, err := createToken(cs)
+	token, err := CreateToken(cs)
 	if err != nil {
 		return nil, err
 	}

@@ -129,7 +129,7 @@ func (c *Cluster) reconcileServices(ctx context.Context, services map[string]*v1
 
 	if len(newServices) > 0 {
 		for _, service := range newServices {
-			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.GetName(), c.cluster.GetNamespace(), c.cluster.AsOwner(), c.isSecureClient(), service)
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.GetName(), c.cluster.GetNamespace(), c.cluster.AsOwner(), c.isSecureClient(), service, c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 			if err != nil {
 				return err
 			}

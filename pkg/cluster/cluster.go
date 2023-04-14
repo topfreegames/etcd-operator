@@ -378,21 +378,21 @@ func (c *Cluster) Update(cl *api.EtcdCluster) {
 func (c *Cluster) setupServices(ctx context.Context) error {
 	if c.cluster.Spec.Services != nil {
 		for _, service := range c.cluster.Spec.Services {
-			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service)
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service, c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 			if err != nil {
 				return err
 			}
 			c.status.ServiceName = append(c.status.ServiceName, service.Name)
 		}
 	} else {
-		err := k8sutil.CreateClientService(ctx, c.config.KubeCli, k8sutil.ClientServiceName(c.cluster.Name), c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), nil)
+		err := k8sutil.CreateClientService(ctx, c.config.KubeCli, k8sutil.ClientServiceName(c.cluster.Name), c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), nil,  c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 		if err != nil {
 			return err
 		}
 		c.status.ServiceName = append(c.status.ServiceName, k8sutil.ClientServiceName(c.cluster.Name))
 	}
 
-	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient())
+	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(),  c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 }
 
 func (c *Cluster) isPodPVEnabled() bool {

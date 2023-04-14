@@ -81,6 +81,18 @@ const (
 
 var ErrDiscoveryTokenNotProvided = errors.New("cluster token not provided, you must provide a token when clustering mode is discovery")
 
+var CreateSvc createService = func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
+
+    applyServicePolicy(svc, service)
+    addOwnerRefToObject(svc.GetObjectMeta(), owner)
+    _, err := kubecli.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
+    if err != nil && !apierrors.IsAlreadyExists(err) {
+        return err
+    }
+    return nil
+}
+
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
 }
@@ -157,7 +169,7 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
-func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy) error {
+func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy, clusteringMode string, createSvc createService) error {
 
 	if len(serviceName) == 0 {
 		return fmt.Errorf("fail to create service: name isn't defined")
@@ -176,8 +188,7 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		TargetPort: intstr.FromInt(EtcdClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-	annotations := map[string]string{}
-
+	
 	var err error = nil
 	if service != nil {
 		var clientPorts []v1.ServicePort
@@ -186,15 +197,29 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		} else {
 			clientPorts = defaultPort
 		}
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service, annotations)
+		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service, service.Annotations)
 	} else {
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, nil, annotations)
+		annotations := map[string]string{}
+		service := &api.ServicePolicy{}
+		if clusteringMode == "discovery" {
+			service = &api.ServicePolicy{
+				Type:      v1.ServiceTypeLoadBalancer,
+				ClusterIP: v1.ClusterIPNone,
+			}
+			annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+			annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+			annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing"
+		} else {
+			service = nil
+		}
+		
+		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, service, annotations)
 	}
 
 	return err
 }
 
-func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool) error {
+func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, clusteringMode string, createSvc createService) error {
 
 	var EtcdClientPortName string
 	if tls {
@@ -214,27 +239,31 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 		TargetPort: intstr.FromInt(2380),
 		Protocol:   v1.ProtocolTCP,
 	}}
-
-	service := &api.ServicePolicy{
-		Type:      v1.ServiceTypeClusterIP,
-		ClusterIP: v1.ClusterIPNone,
-	}
-
+	
+	service := &api.ServicePolicy{}
 	annotations := map[string]string{}
-	return createService(ctx, kubecli, clusterName, clusterName, ns, ports, owner, true, service, annotations)
-}
-
-func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
-	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
-
-	applyServicePolicy(svc, service)
-	addOwnerRefToObject(svc.GetObjectMeta(), owner)
-	_, err := kubecli.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
+	if clusteringMode == "discovery"{
+		service = &api.ServicePolicy{
+			Type:      v1.ServiceTypeLoadBalancer,
+			ClusterIP: v1.ClusterIPNone,
+		}
+		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+	} else {
+		service = &api.ServicePolicy{
+			Type:      v1.ServiceTypeClusterIP,
+			ClusterIP: v1.ClusterIPNone,
+		}
 	}
-	return nil
+
+	publishNotReadyAddresses := true
+	
+	return createSvc(ctx, kubecli, clusterName, clusterName, ns, ports, owner, publishNotReadyAddresses, service, annotations)
 }
+
+type (
+	createService func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error
+)
 
 // CreateAndWaitPod creates a pod and waits until it is running
 func CreateAndWaitPod(ctx context.Context, kubecli kubernetes.Interface, ns string, pod *v1.Pod, timeout time.Duration) (*v1.Pod, error) {

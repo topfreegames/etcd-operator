@@ -20,6 +20,8 @@ import (
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func TestDefaultBusyboxImageName(t *testing.T) {
@@ -227,5 +229,58 @@ func TestCreateTokenNoMode(t *testing.T) {
 
 	if token == "testtoken" {
 		t.Errorf("expected random uiid token, got=%s", clusterSpec.ClusterToken)
+	}
+}
+
+func TestLabelsForCluster(t *testing.T) {
+	clusterName := "test-cluster"
+
+	labels := LabelsForCluster(clusterName)
+
+	if labels["etcd_cluster"] != "test-cluster" {
+		t.Errorf("expected cluster name to be %s, got=%s", clusterName, labels["etcd_cluster"])
+	}
+
+	if labels["app"] != "etcd" {
+		t.Errorf("expected cluster name to be %s, got=%s", clusterName, labels["app"])
+	}
+}
+
+func TestNewEtcdServiceManifestLocalCluster(t *testing.T) {
+	clusterName := "test-cluster"
+	svcName := "test-cluster-svc"
+	ports := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}} 
+	publishNotReadyAddresses := true
+	annotations := map[string]string{
+		"my-annotation": "its value",
+	}
+
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
+
+	if svc.ObjectMeta.Name != svcName {
+		t.Errorf("expected service name to be %s, got=%s", svcName, svc.ObjectMeta.Name)
+	}
+	if svc.ObjectMeta.Labels["etcd_cluster"] != clusterName {
+		t.Errorf("expected label name to be %s, got=%s", clusterName, svc.ObjectMeta.Labels["etcd_cluster"])
+	}
+	if svc.ObjectMeta.Annotations["my-annotation"] != "its value" {
+		t.Errorf("expected label name to be %s, got=%s", "its value", svc.ObjectMeta.Annotations["my-annotation"])
+	}
+	if len(svc.Spec.Ports) != 1 {
+		t.Errorf("expected 1 service ports name, got=%d", len(svc.Spec.Ports))
+	}
+	if svc.Spec.Selector == nil {
+		t.Errorf("selector not correctly assigned")
+	}
+	if svc.Spec.Selector["etcd_cluster"] != "test-cluster" {
+		t.Errorf("expected selector name to be %s, got=%s", clusterName, svc.Spec.Selector["etcd_cluster"])
+	}
+	if svc.Spec.PublishNotReadyAddresses != publishNotReadyAddresses {
+		t.Errorf("expected selector name to be %t, got=%t", publishNotReadyAddresses, svc.Spec.PublishNotReadyAddresses)
 	}
 }

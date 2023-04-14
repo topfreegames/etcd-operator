@@ -176,6 +176,7 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		TargetPort: intstr.FromInt(EtcdClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
+	annotations := map[string]string{}
 
 	var err error = nil
 	if service != nil {
@@ -185,9 +186,9 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		} else {
 			clientPorts = defaultPort
 		}
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service)
+		err = createService(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service, annotations)
 	} else {
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, nil)
+		err = createService(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, nil, annotations)
 	}
 
 	return err
@@ -219,11 +220,12 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 		ClusterIP: v1.ClusterIPNone,
 	}
 
-	return createService(ctx, kubecli, clusterName, clusterName, ns, ports, owner, true, service)
+	annotations := map[string]string{}
+	return createService(ctx, kubecli, clusterName, clusterName, ns, ports, owner, true, service, annotations)
 }
 
-func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy) error {
-	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses)
+func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
 
 	applyServicePolicy(svc, service)
 	addOwnerRefToObject(svc.GetObjectMeta(), owner)
@@ -268,13 +270,13 @@ func CreateAndWaitPod(ctx context.Context, kubecli kubernetes.Interface, ns stri
 	return retPod, nil
 }
 
-func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort, publishNotReadyAddresses bool) *v1.Service {
+func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort, publishNotReadyAddresses bool, annotations map[string]string) *v1.Service {
 	labels := LabelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        svcName,
 			Labels:      labels,
-			Annotations: map[string]string{},
+			Annotations: annotations,
 		},
 		Spec: v1.ServiceSpec{
 			Ports:                    ports,

@@ -392,12 +392,21 @@ func ClientServiceName(clusterName string) string {
 	return clusterName + "-client"
 }
 
-func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
+func setupPeerServiceURL(endpoint string) string {
+	return fmt.Sprintf("http://%s:2380", endpoint)
+}
+
+func setupClientServiceURL(endpoint string) string {
+	return fmt.Sprintf("http://%s:2379", endpoint)
+}
+
+func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
+		serviceUrl := service.Spec.ExternalName
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
 			"--discovery=%s/%s",
-			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), discoveryEndpoint, clusterToken)
+			dataDir, m.Name, setupPeerServiceURL(serviceUrl), m.ListenPeerURL(), m.ListenClientURL(), setupClientServiceURL(serviceUrl), discoveryEndpoint, clusterToken)
 		return command, nil
 	} else {
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
@@ -412,7 +421,11 @@ func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string,
 }
 
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
-	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode)
+	service, err := kubecli.CoreV1().Services(clusterNamespace).Get(ctx, clusterName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode, *service)
 	if err != nil {
 		return nil, err
 	}

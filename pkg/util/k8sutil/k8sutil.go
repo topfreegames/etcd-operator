@@ -564,9 +564,12 @@ func podSecurityContext(podPolicy *api.PodPolicy) *v1.PodSecurityContext {
 
 func NewEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec, owner metav1.OwnerReference) (*v1.Pod, error) {
 	pod, err := newEtcdPod(ctx, kubecli, m, initialCluster, clusterName, clusterNamespace, state, token, cs)
+	if err != nil {
+		return nil, err
+	}
 	applyPodPolicy(clusterName, pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
-	return pod, err
+	return pod, nil
 }
 
 func MustNewKubeClient() kubernetes.Interface {

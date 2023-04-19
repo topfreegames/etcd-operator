@@ -413,7 +413,10 @@ func (c *Cluster) createPod(ctx context.Context, members etcdutil.MemberSet, m *
 		return err
 	}
 	
-	pod, _ := k8sutil.NewEtcdPod(ctx, c.config.KubeCli, m, members.PeerURLPairs(), c.cluster.Name, c.cluster.Namespace, state, token, c.cluster.Spec, c.cluster.AsOwner())
+	pod, err := k8sutil.NewEtcdPod(ctx, c.config.KubeCli, m, members.PeerURLPairs(), c.cluster.Name, c.cluster.Namespace, state, token, c.cluster.Spec, c.cluster.AsOwner())
+	if err != nil {
+		return err
+	}
 	if c.isPodPVEnabled() {
 		pvc := k8sutil.NewEtcdPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
 		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(ctx, pvc, metav1.CreateOptions{})

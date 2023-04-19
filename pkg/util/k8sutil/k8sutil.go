@@ -421,11 +421,20 @@ func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string,
 }
 
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
-	service, err := kubecli.CoreV1().Services(clusterNamespace).Get(ctx, clusterName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
+	var service v1.Service
+	if cs.ClusteringMode == "discovery" {
+		services, err := kubecli.CoreV1().Services(clusterNamespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+		for _, svc := range services.Items {
+			if svc.Name == clusterName {
+				service = svc
+			}
+		}
+
 	}
-	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode, *service)
+	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode, service)
 	if err != nil {
 		return nil, err
 	}

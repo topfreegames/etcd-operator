@@ -160,9 +160,14 @@ func TestEtcdCommandDiscoveryCluster(t *testing.T) {
 	clusterState := "new"
 	clusterToken := "token"
 	clusteringMode := "discovery"
+	hostname := v1.LoadBalancerIngress{
+		Hostname: "etcd-peer",
+	}
 	service := v1.Service{
-		Spec : v1.ServiceSpec{
-			ExternalName: "etcd-peer",
+		Status: v1.ServiceStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{hostname},
+			},
 		},
 	}
 

@@ -400,7 +400,7 @@ func setupClientServiceURL(endpoint string) string {
 
 func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
-		serviceUrl := service.Spec.ExternalName
+		serviceUrl := service.Status.LoadBalancer.Ingress[0].Hostname
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
 			"--discovery=%s/%s",

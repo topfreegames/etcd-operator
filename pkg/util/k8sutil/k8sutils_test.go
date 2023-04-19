@@ -69,8 +69,9 @@ func TestEtcdCommandNewLocalCluster(t *testing.T) {
 	memberSet := etcdutil.NewMemberSet(etcdMember).PeerURLPairs()
 	clusterState := "new"
 	token := "token"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, "")
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, "", service)
 
 	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
@@ -103,8 +104,9 @@ func TestEtcdCommandExistingLocalCluster(t *testing.T) {
 	memberSetURLs := memberSet.PeerURLPairs()
 	token := "token"
 	clusterState := "existing"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember2, strings.Join(memberSetURLs, ","), clusterState, token, "")
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember2, strings.Join(memberSetURLs, ","), clusterState, token, "", service)
 
 	commandBeforeClusterSet := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test-2 --initial-advertise-peer-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2379 "
@@ -132,8 +134,9 @@ func TestEtcdCommandInvalidClusterMode(t *testing.T) {
 	clusterState := "new"
 	token := "token"
 	clusteringMode := "invalid"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, clusteringMode)
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, clusteringMode, service)
 
 	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
@@ -157,11 +160,16 @@ func TestEtcdCommandDiscoveryCluster(t *testing.T) {
 	clusterState := "new"
 	clusterToken := "token"
 	clusteringMode := "discovery"
+	service := v1.Service{
+		Spec : v1.ServiceSpec{
+			ExternalName: "etcd-peer",
+		},
+	}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, clusterToken, clusteringMode)
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, clusterToken, clusteringMode, service)
 
-	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
-		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
+	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-peer:2380 " +
+		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-peer:2379 " +
 		"--discovery=https://discovery.etcd.io/token"
 
 	if initialEtcdCommand != expectedCommand {

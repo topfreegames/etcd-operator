@@ -473,7 +473,6 @@ func TestCreatePeerServiceDiscoveryCluster(t *testing.T) {
 	}}
 	expectedService := &api.ServicePolicy{
 		Type:      v1.ServiceTypeLoadBalancer,
-		ClusterIP: v1.ClusterIPNone,
 	}
 	expectedAnnotations := map[string]string{
 		"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",
@@ -852,7 +851,6 @@ func TestCreateClientServiceDiscoveryClusterNilService(t *testing.T) {
 	}}
 	expectedService := &api.ServicePolicy{
 		Type:      v1.ServiceTypeLoadBalancer,
-		ClusterIP: v1.ClusterIPNone,
 	}
 	expectedAnnotations := map[string]string{
 		"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",

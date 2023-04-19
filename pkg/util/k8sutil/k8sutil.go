@@ -204,7 +204,6 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		if clusteringMode == "discovery" {
 			service = &api.ServicePolicy{
 				Type:      v1.ServiceTypeLoadBalancer,
-				ClusterIP: v1.ClusterIPNone,
 			}
 			annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
 			annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
@@ -245,7 +244,6 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 	if clusteringMode == "discovery"{
 		service = &api.ServicePolicy{
 			Type:      v1.ServiceTypeLoadBalancer,
-			ClusterIP: v1.ClusterIPNone,
 		}
 		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
 		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"

@@ -90,7 +90,30 @@ var CreateSvc createService = func(ctx context.Context, kubecli kubernetes.Inter
     if err != nil && !apierrors.IsAlreadyExists(err) {
         return err
     }
+	done := make(chan string)
+	go getServiceStatus(ctx, kubecli, svcName, ns, done)
+	status := <- done
+	if status != "created" {
+		return fmt.Errorf("failed to finish the service creation: %v", status)
+	}
     return nil
+}
+
+func getServiceStatus(ctx context.Context, kubecli kubernetes.Interface, svcName string, ns string, status chan string) {
+	service, err := kubecli.CoreV1().Services(ns).Get(ctx, svcName, metav1.GetOptions{})
+	if err != nil {
+		status <- err.Error()
+	}
+
+	for i := 0; i < 20; i++ {
+		if len(service.Status.LoadBalancer.Ingress) == 0 {
+			time.Sleep(30 * time.Second)
+		} else {
+			status <- "created"
+			break
+		}
+	}
+	status <- "timeout creating service"
 }
 
 func GetEtcdVersion(pod *v1.Pod) string {

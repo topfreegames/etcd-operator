@@ -109,7 +109,7 @@ func getServiceStatus(ctx context.Context, kubecli kubernetes.Interface, svcName
 			time.Sleep(30 * time.Second)
 		} else {
 			status <- "created"
-			break
+			return
 		}
 	}
 	status <- "timeout creating service"

@@ -100,12 +100,11 @@ var CreateSvc createService = func(ctx context.Context, kubecli kubernetes.Inter
 }
 
 func getServiceStatus(ctx context.Context, kubecli kubernetes.Interface, svcName string, ns string, status chan string) {
-	service, err := kubecli.CoreV1().Services(ns).Get(ctx, svcName, metav1.GetOptions{})
-	if err != nil {
-		status <- err.Error()
-	}
-
 	for i := 0; i < 20; i++ {
+		service, err := kubecli.CoreV1().Services(ns).Get(ctx, svcName, metav1.GetOptions{})
+		if err != nil {
+			status <- err.Error()
+		}
 		if len(service.Status.LoadBalancer.Ingress) == 0 {
 			time.Sleep(30 * time.Second)
 		} else {

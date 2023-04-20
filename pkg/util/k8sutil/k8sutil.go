@@ -401,6 +401,9 @@ func setupClientServiceURL(endpoint string) string {
 func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
 		serviceUrl := service.Status.LoadBalancer.Ingress[0].Hostname
+		if serviceUrl == "" {
+			return "", fmt.Errorf("failed to get service url: %v", service)
+		}
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
 			"--discovery=%s/%s",
@@ -426,7 +429,7 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 			return nil, err
 		}
 		for _, svc := range services.Items {
-			if svc.Name == clusterName {
+			if svc.ObjectMeta.Name == clusterName {
 				service = svc
 			}
 		}

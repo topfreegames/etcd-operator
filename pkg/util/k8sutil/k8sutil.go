@@ -400,6 +400,7 @@ func setupClientServiceURL(endpoint string) string {
 
 func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
+		fmt.Printf("Services url list: %v", service.Status.LoadBalancer.Ingress)
 		serviceUrl := service.Status.LoadBalancer.Ingress[0].Hostname
 		if serviceUrl == "" {
 			return "", fmt.Errorf("failed to get service url: %v", service)
@@ -425,7 +426,9 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 	var service v1.Service
 	if cs.ClusteringMode == "discovery" {
 		services, err := kubecli.CoreV1().Services(clusterNamespace).List(ctx, metav1.ListOptions{})
+		fmt.Printf("Services list: %v", services)
 		if err != nil {
+			fmt.Printf("%s",err.Error())
 			return nil, err
 		}
 		for _, svc := range services.Items {

@@ -81,7 +81,7 @@ const (
 
 var ErrDiscoveryTokenNotProvided = errors.New("cluster token not provided, you must provide a token when clustering mode is discovery")
 
-var CreateSvc createService = func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
+var CreateSvc CreateService = func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
 	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
 
     applyServicePolicy(svc, service)
@@ -191,7 +191,7 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
-func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy, clusteringMode string, createSvc createService) error {
+func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy, clusteringMode string, createSvc CreateService) error {
 
 	if len(serviceName) == 0 {
 		return fmt.Errorf("fail to create service: name isn't defined")
@@ -240,7 +240,7 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 	return err
 }
 
-func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, clusteringMode string, createSvc createService) error {
+func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, clusteringMode string, createSvc CreateService) error {
 
 	var EtcdClientPortName string
 	if tls {
@@ -282,7 +282,7 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 }
 
 type (
-	createService func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error
+	CreateService func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error
 )
 
 // CreateAndWaitPod creates a pod and waits until it is running

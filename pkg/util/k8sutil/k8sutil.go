@@ -105,7 +105,7 @@ func getServiceStatus(ctx context.Context, kubecli kubernetes.Interface, svcName
 		if err != nil {
 			status <- err.Error()
 		}
-		if len(service.Status.LoadBalancer.Ingress) == 0 {
+		if service.Spec.Type == v1.ServiceTypeLoadBalancer && len(service.Status.LoadBalancer.Ingress) == 0 {
 			time.Sleep(30 * time.Second)
 		} else {
 			status <- "created"

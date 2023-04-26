@@ -191,6 +191,34 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
+func setupClientServiceObject(clusteringMode string) (*api.ServicePolicy, map[string]string) {
+	annotations := map[string]string{}
+	service := api.ServicePolicy{}
+	if clusteringMode == "discovery" {
+		service.Type = v1.ServiceTypeLoadBalancer
+		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing"
+		return &service, annotations
+	} else {
+		return nil, annotations
+	}
+}
+
+func setupPeerServiceObject(clusteringMode string) (api.ServicePolicy, map[string]string) {
+	service := api.ServicePolicy{}
+	annotations := map[string]string{}
+	if clusteringMode == "discovery"{
+		service.Type = v1.ServiceTypeLoadBalancer
+		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+	} else {
+		service.Type = v1.ServiceTypeClusterIP
+		service.ClusterIP = v1.ClusterIPNone
+	}
+	return service, annotations
+}
+
 func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy, clusteringMode string, createSvc CreateService) error {
 
 	if len(serviceName) == 0 {
@@ -221,18 +249,7 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		}
 		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service, service.Annotations)
 	} else {
-		annotations := map[string]string{}
-		service := &api.ServicePolicy{}
-		if clusteringMode == "discovery" {
-			service = &api.ServicePolicy{
-				Type:      v1.ServiceTypeLoadBalancer,
-			}
-			annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
-			annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
-			annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing"
-		} else {
-			service = nil
-		}
+		service, annotations := setupClientServiceObject(clusteringMode)
 		
 		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, service, annotations)
 	}
@@ -261,24 +278,10 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 		Protocol:   v1.ProtocolTCP,
 	}}
 	
-	service := &api.ServicePolicy{}
-	annotations := map[string]string{}
-	if clusteringMode == "discovery"{
-		service = &api.ServicePolicy{
-			Type:      v1.ServiceTypeLoadBalancer,
-		}
-		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
-		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
-	} else {
-		service = &api.ServicePolicy{
-			Type:      v1.ServiceTypeClusterIP,
-			ClusterIP: v1.ClusterIPNone,
-		}
-	}
-
+	service, annotations := setupPeerServiceObject(clusteringMode)
 	publishNotReadyAddresses := true
 	
-	return createSvc(ctx, kubecli, clusterName, clusterName, ns, ports, owner, publishNotReadyAddresses, service, annotations)
+	return createSvc(ctx, kubecli, clusterName, clusterName, ns, ports, owner, publishNotReadyAddresses, &service, annotations)
 }
 
 type (

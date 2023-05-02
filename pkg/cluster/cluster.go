@@ -155,6 +155,11 @@ func (c *Cluster) setup(ctx context.Context) error {
 	}
 
 	if shouldCreateCluster {
+		if c.cluster.Spec.ClusteringMode == "discovery" {
+			if err := c.setupServices(ctx); err != nil {
+				c.logger.Errorf("fail to setup etcd services: %v", err)
+			}
+		}
 		return c.create(ctx)
 	}
 	return nil
@@ -378,21 +383,21 @@ func (c *Cluster) Update(cl *api.EtcdCluster) {
 func (c *Cluster) setupServices(ctx context.Context) error {
 	if c.cluster.Spec.Services != nil {
 		for _, service := range c.cluster.Spec.Services {
-			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service)
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), service, c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 			if err != nil {
 				return err
 			}
 			c.status.ServiceName = append(c.status.ServiceName, service.Name)
 		}
 	} else {
-		err := k8sutil.CreateClientService(ctx, c.config.KubeCli, k8sutil.ClientServiceName(c.cluster.Name), c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), nil)
+		err := k8sutil.CreateClientService(ctx, c.config.KubeCli, k8sutil.ClientServiceName(c.cluster.Name), c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(), nil,  c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 		if err != nil {
 			return err
 		}
 		c.status.ServiceName = append(c.status.ServiceName, k8sutil.ClientServiceName(c.cluster.Name))
 	}
 
-	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient())
+	return k8sutil.CreatePeerService(ctx, c.config.KubeCli, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner(), c.isSecureClient(),  c.cluster.Spec.ClusteringMode, k8sutil.CreateSvc)
 }
 
 func (c *Cluster) isPodPVEnabled() bool {
@@ -409,6 +414,9 @@ func (c *Cluster) createPod(ctx context.Context, members etcdutil.MemberSet, m *
 	}
 	
 	pod, err := k8sutil.NewEtcdPod(ctx, c.config.KubeCli, m, members.PeerURLPairs(), c.cluster.Name, c.cluster.Namespace, state, token, c.cluster.Spec, c.cluster.AsOwner())
+	if err != nil {
+		return err
+	}
 	if c.isPodPVEnabled() {
 		pvc := k8sutil.NewEtcdPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
 		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(ctx, pvc, metav1.CreateOptions{})

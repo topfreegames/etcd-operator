@@ -81,6 +81,40 @@ const (
 
 var ErrDiscoveryTokenNotProvided = errors.New("cluster token not provided, you must provide a token when clustering mode is discovery")
 
+var CreateSvc CreateService = func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
+
+    applyServicePolicy(svc, service)
+    addOwnerRefToObject(svc.GetObjectMeta(), owner)
+    _, err := kubecli.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
+    if err != nil && !apierrors.IsAlreadyExists(err) {
+        return err
+    }
+	done := make(chan string)
+	go getServiceStatus(ctx, kubecli, svcName, ns, done)
+	status := <- done
+	if status != "created" {
+		return fmt.Errorf("failed to finish the service creation: %v", status)
+	}
+    return nil
+}
+
+func getServiceStatus(ctx context.Context, kubecli kubernetes.Interface, svcName string, ns string, status chan string) {
+	for i := 0; i < 20; i++ {
+		service, err := kubecli.CoreV1().Services(ns).Get(ctx, svcName, metav1.GetOptions{})
+		if err != nil {
+			status <- err.Error()
+		}
+		if service.Spec.Type == v1.ServiceTypeLoadBalancer && len(service.Status.LoadBalancer.Ingress) == 0 {
+			time.Sleep(30 * time.Second)
+		} else {
+			status <- "created"
+			return
+		}
+	}
+	status <- "timeout creating service"
+}
+
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
 }
@@ -157,7 +191,35 @@ func PodWithNodeSelector(p *v1.Pod, ns map[string]string) *v1.Pod {
 	return p
 }
 
-func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy) error {
+func setupClientServiceObject(clusteringMode string) (*api.ServicePolicy, map[string]string) {
+	annotations := map[string]string{}
+	service := api.ServicePolicy{}
+	if clusteringMode == "discovery" {
+		service.Type = v1.ServiceTypeLoadBalancer
+		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"] = "internet-facing"
+		return &service, annotations
+	} else {
+		return nil, annotations
+	}
+}
+
+func setupPeerServiceObject(clusteringMode string) (api.ServicePolicy, map[string]string) {
+	service := api.ServicePolicy{}
+	annotations := map[string]string{}
+	if clusteringMode == "discovery"{
+		service.Type = v1.ServiceTypeLoadBalancer
+		annotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"] = "instance"
+		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "external"
+	} else {
+		service.Type = v1.ServiceTypeClusterIP
+		service.ClusterIP = v1.ClusterIPNone
+	}
+	return service, annotations
+}
+
+func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serviceName, clusterName, ns string, owner metav1.OwnerReference, tls bool, service *api.ServicePolicy, clusteringMode string, createSvc CreateService) error {
 
 	if len(serviceName) == 0 {
 		return fmt.Errorf("fail to create service: name isn't defined")
@@ -176,7 +238,7 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		TargetPort: intstr.FromInt(EtcdClientPort),
 		Protocol:   v1.ProtocolTCP,
 	}}
-
+	
 	var err error = nil
 	if service != nil {
 		var clientPorts []v1.ServicePort
@@ -185,15 +247,17 @@ func CreateClientService(ctx context.Context, kubecli kubernetes.Interface, serv
 		} else {
 			clientPorts = defaultPort
 		}
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service)
+		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, clientPorts, owner, false, service, service.Annotations)
 	} else {
-		err = createService(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, nil)
+		service, annotations := setupClientServiceObject(clusteringMode)
+		
+		err = createSvc(ctx, kubecli, serviceName, clusterName, ns, defaultPort, owner, false, service, annotations)
 	}
 
 	return err
 }
 
-func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool) error {
+func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, clusterName, ns string, owner metav1.OwnerReference, tls bool, clusteringMode string, createSvc CreateService) error {
 
 	var EtcdClientPortName string
 	if tls {
@@ -213,26 +277,16 @@ func CreatePeerService(ctx context.Context, kubecli kubernetes.Interface, cluste
 		TargetPort: intstr.FromInt(2380),
 		Protocol:   v1.ProtocolTCP,
 	}}
-
-	service := &api.ServicePolicy{
-		Type:      v1.ServiceTypeClusterIP,
-		ClusterIP: v1.ClusterIPNone,
-	}
-
-	return createService(ctx, kubecli, clusterName, clusterName, ns, ports, owner, true, service)
+	
+	service, annotations := setupPeerServiceObject(clusteringMode)
+	publishNotReadyAddresses := true
+	
+	return createSvc(ctx, kubecli, clusterName, clusterName, ns, ports, owner, publishNotReadyAddresses, &service, annotations)
 }
 
-func createService(ctx context.Context, kubecli kubernetes.Interface, svcName, clusterName, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy) error {
-	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses)
-
-	applyServicePolicy(svc, service)
-	addOwnerRefToObject(svc.GetObjectMeta(), owner)
-	_, err := kubecli.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	return nil
-}
+type (
+	CreateService func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clusterName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error
+)
 
 // CreateAndWaitPod creates a pod and waits until it is running
 func CreateAndWaitPod(ctx context.Context, kubecli kubernetes.Interface, ns string, pod *v1.Pod, timeout time.Duration) (*v1.Pod, error) {
@@ -268,13 +322,13 @@ func CreateAndWaitPod(ctx context.Context, kubecli kubernetes.Interface, ns stri
 	return retPod, nil
 }
 
-func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort, publishNotReadyAddresses bool) *v1.Service {
+func newEtcdServiceManifest(svcName, clusterName string, ports []v1.ServicePort, publishNotReadyAddresses bool, annotations map[string]string) *v1.Service {
 	labels := LabelsForCluster(clusterName)
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        svcName,
 			Labels:      labels,
-			Annotations: map[string]string{},
+			Annotations: annotations,
 		},
 		Spec: v1.ServiceSpec{
 			Ports:                    ports,
@@ -361,12 +415,25 @@ func ClientServiceName(clusterName string) string {
 	return clusterName + "-client"
 }
 
-func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string) (string, error) {
+func setupPeerServiceURL(endpoint string) string {
+	return fmt.Sprintf("http://%s:2380", endpoint)
+}
+
+func setupClientServiceURL(endpoint string) string {
+	return fmt.Sprintf("http://%s:2379", endpoint)
+}
+
+func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
+		fmt.Printf("Services url list: %v", service.Status.LoadBalancer.Ingress)
+		serviceUrl := service.Status.LoadBalancer.Ingress[0].Hostname
+		if serviceUrl == "" {
+			return "", fmt.Errorf("failed to get service url: %v", service)
+		}
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
 			"--discovery=%s/%s",
-			dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), discoveryEndpoint, clusterToken)
+			dataDir, m.Name, setupPeerServiceURL(serviceUrl), m.ListenPeerURL(), m.ListenClientURL(), setupClientServiceURL(serviceUrl), discoveryEndpoint, clusterToken)
 		return command, nil
 	} else {
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
@@ -381,7 +448,22 @@ func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string,
 }
 
 func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
-	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode)
+	var service v1.Service
+	if cs.ClusteringMode == "discovery" {
+		services, err := kubecli.CoreV1().Services(clusterNamespace).List(ctx, metav1.ListOptions{})
+		fmt.Printf("Services list: %v", services)
+		if err != nil {
+			fmt.Printf("%s",err.Error())
+			return nil, err
+		}
+		for _, svc := range services.Items {
+			if svc.ObjectMeta.Name == clusterName {
+				service = svc
+			}
+		}
+
+	}
+	command, err := setupEtcdCommand(dataDir, m, strings.Join(initialCluster, ","), state, token, cs.ClusteringMode, service)
 	if err != nil {
 		return nil, err
 	}
@@ -520,9 +602,12 @@ func podSecurityContext(podPolicy *api.PodPolicy) *v1.PodSecurityContext {
 
 func NewEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.Member, initialCluster []string, clusterName, clusterNamespace, state, token string, cs api.ClusterSpec, owner metav1.OwnerReference) (*v1.Pod, error) {
 	pod, err := newEtcdPod(ctx, kubecli, m, initialCluster, clusterName, clusterNamespace, state, token, cs)
+	if err != nil {
+		return nil, err
+	}
 	applyPodPolicy(clusterName, pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
-	return pod, err
+	return pod, nil
 }
 
 func MustNewKubeClient() kubernetes.Interface {

@@ -20,9 +20,11 @@ import (
 	"testing"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -129,11 +131,29 @@ func TestReconcileServices(t *testing.T) {
 		},
 	}
 
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {
+		labels := k8sutil.LabelsForCluster(clstrName)
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        svcName,
+				Labels:      labels,
+				Annotations: annotations,
+			},
+			Spec: v1.ServiceSpec{
+				Ports:                    ports,
+				Selector:                 labels,
+				PublishNotReadyAddresses: publishNotReadyAddresses,
+			},
+		}
+		kubecli.(*fake.Clientset).CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
+		return nil
+	}
+
 	for _, tt := range tests {
 		c.config.KubeCli.(*fake.Clientset).ClearActions()
 
 		c.cluster.Spec.Services = tt.desiredServices
-		err := c.reconcileServices(context.Background(), tt.currentServices)
+		err := c.reconcileServices(context.Background(), tt.currentServices, createSvc)
 		if err != nil {
 			t.Fatalf("%s: %s", tt.name, err)
 		}

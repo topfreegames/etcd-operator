@@ -15,11 +15,18 @@
 package k8sutil
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
+	"github.com/google/go-cmp/cmp"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
 )
 
 func TestDefaultBusyboxImageName(t *testing.T) {
@@ -62,8 +69,9 @@ func TestEtcdCommandNewLocalCluster(t *testing.T) {
 	memberSet := etcdutil.NewMemberSet(etcdMember).PeerURLPairs()
 	clusterState := "new"
 	token := "token"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, "")
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, "", service)
 
 	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
@@ -96,8 +104,9 @@ func TestEtcdCommandExistingLocalCluster(t *testing.T) {
 	memberSetURLs := memberSet.PeerURLPairs()
 	token := "token"
 	clusterState := "existing"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember2, strings.Join(memberSetURLs, ","), clusterState, token, "")
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember2, strings.Join(memberSetURLs, ","), clusterState, token, "", service)
 
 	commandBeforeClusterSet := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test-2 --initial-advertise-peer-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test-2.etcd-test.etcd.svc.local:2379 "
@@ -125,8 +134,9 @@ func TestEtcdCommandInvalidClusterMode(t *testing.T) {
 	clusterState := "new"
 	token := "token"
 	clusteringMode := "invalid"
+	service := v1.Service{}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, clusteringMode)
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, token, clusteringMode, service)
 
 	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
 		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
@@ -150,11 +160,21 @@ func TestEtcdCommandDiscoveryCluster(t *testing.T) {
 	clusterState := "new"
 	clusterToken := "token"
 	clusteringMode := "discovery"
+	hostname := v1.LoadBalancerIngress{
+		Hostname: "etcd-peer",
+	}
+	service := v1.Service{
+		Status: v1.ServiceStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{hostname},
+			},
+		},
+	}
 
-	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, clusterToken, clusteringMode)
+	initialEtcdCommand, _ := setupEtcdCommand(dataDir, etcdMember, strings.Join(memberSet, ","), clusterState, clusterToken, clusteringMode, service)
 
-	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-test.etcd.etcd.svc.local:2380 " +
-		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-test.etcd.etcd.svc.local:2379 " +
+	expectedCommand := "/usr/local/bin/etcd --data-dir=/var/etcd/data --name=etcd-test --initial-advertise-peer-urls=http://etcd-peer:2380 " +
+		"--listen-peer-urls=http://0.0.0.0:2380 --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://etcd-peer:2379 " +
 		"--discovery=https://discovery.etcd.io/token"
 
 	if initialEtcdCommand != expectedCommand {
@@ -203,7 +223,7 @@ func TestCreateTokenDiscoveryClusterTokenEmpty(t *testing.T) {
 	}
 }
 
-func TestCreateTokenDistributedCluster(t *testing.T) {
+func TestCreateTokenDiscoveryCluster(t *testing.T) {
 	clusterSpec := &api.ClusterSpec{
 		Size:           1,
 		ClusteringMode: "discovery",
@@ -227,5 +247,770 @@ func TestCreateTokenNoMode(t *testing.T) {
 
 	if token == "testtoken" {
 		t.Errorf("expected random uiid token, got=%s", clusterSpec.ClusterToken)
+	}
+}
+
+func TestLabelsForCluster(t *testing.T) {
+	clusterName := "test-cluster"
+
+	labels := LabelsForCluster(clusterName)
+
+	if labels["etcd_cluster"] != "test-cluster" {
+		t.Errorf("expected cluster name to be %s, got=%s", clusterName, labels["etcd_cluster"])
+	}
+
+	if labels["app"] != "etcd" {
+		t.Errorf("expected cluster name to be %s, got=%s", clusterName, labels["app"])
+	}
+}
+
+func TestNewEtcdServiceManifestLocalCluster(t *testing.T) {
+	clusterName := "test-cluster"
+	svcName := "test-cluster-svc"
+	ports := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}} 
+	publishNotReadyAddresses := true
+	annotations := map[string]string{
+		"my-annotation": "its value",
+	}
+
+	svc := newEtcdServiceManifest(svcName, clusterName, ports, publishNotReadyAddresses, annotations)
+
+	if svc.ObjectMeta.Name != svcName {
+		t.Errorf("expected service name to be %s, got=%s", svcName, svc.ObjectMeta.Name)
+	}
+	if svc.ObjectMeta.Labels["etcd_cluster"] != clusterName {
+		t.Errorf("expected label name to be %s, got=%s", clusterName, svc.ObjectMeta.Labels["etcd_cluster"])
+	}
+	if svc.ObjectMeta.Annotations["my-annotation"] != "its value" {
+		t.Errorf("expected label name to be %s, got=%s", "its value", svc.ObjectMeta.Annotations["my-annotation"])
+	}
+	if len(svc.Spec.Ports) != 1 {
+		t.Errorf("expected 1 service ports name, got=%d", len(svc.Spec.Ports))
+	}
+	if svc.Spec.Selector == nil {
+		t.Errorf("selector not correctly assigned")
+	}
+	if svc.Spec.Selector["etcd_cluster"] != "test-cluster" {
+		t.Errorf("expected selector name to be %s, got=%s", clusterName, svc.Spec.Selector["etcd_cluster"])
+	}
+	if svc.Spec.PublishNotReadyAddresses != publishNotReadyAddresses {
+		t.Errorf("expected selector name to be %t, got=%t", publishNotReadyAddresses, svc.Spec.PublishNotReadyAddresses)
+	}
+}
+
+// Peer service tests
+func TestCreatePeerServiceNoTLSLocalCluster(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := clusterName
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "local"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}, {
+		Name:       "peer",
+		Port:       2380,
+		TargetPort: intstr.FromInt(2380),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedService := &api.ServicePolicy{
+		Type:      v1.ServiceTypeClusterIP,
+		ClusterIP: v1.ClusterIPNone,
+	}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != clusterName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreatePeerService(ctx, nil, clusterName, ns, owner, tls, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreatePeerServiceNoTLSNoClusteringMode(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := clusterName
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := ""
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}, {
+		Name:       "peer",
+		Port:       2380,
+		TargetPort: intstr.FromInt(2380),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedService := &api.ServicePolicy{
+		Type:      v1.ServiceTypeClusterIP,
+		ClusterIP: v1.ClusterIPNone,
+	}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != clusterName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreatePeerService(ctx, nil, clusterName, ns, owner, tls, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreatePeerServiceWithTLSLocalCluster(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := clusterName
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := true
+	clusteringMode := "local"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "https-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}, {
+		Name:       "peer",
+		Port:       2380,
+		TargetPort: intstr.FromInt(2380),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedService := &api.ServicePolicy{
+		Type:      v1.ServiceTypeClusterIP,
+		ClusterIP: v1.ClusterIPNone,
+	}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != clusterName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreatePeerService(ctx, nil, clusterName, ns, owner, tls, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreatePeerServiceDiscoveryCluster(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := clusterName
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "discovery"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}, {
+		Name:       "peer",
+		Port:       2380,
+		TargetPort: intstr.FromInt(2380),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedService := &api.ServicePolicy{
+		Type:      v1.ServiceTypeLoadBalancer,
+	}
+	expectedAnnotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",
+    	"service.beta.kubernetes.io/aws-load-balancer-type": "external",
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != clusterName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreatePeerService(ctx, nil, clusterName, ns, owner, tls, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+// Client service tests
+func TestCreateClientServiceNoName(t *testing.T) {
+	ctx := context.TODO()
+	clusterName := "test-cluster"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	tls := false
+
+	res := CreateClientService(ctx, nil, "", clusterName, ns, owner, tls, nil, "", nil)
+	if res == nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceNoTLSLocalClusterNilService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "local"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if service != nil{
+			return fmt.Errorf("expected service to be %v, got=%v", nil, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, nil, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceWithTLSLocalClusterNilService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := true
+	clusteringMode := "local"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "https-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if service != nil{
+			return fmt.Errorf("expected service to be %v, got=%v", nil, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, nil, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceLocalClusterDefinedService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "local"
+	ports := []v1.ServicePort{{
+		Name:       "client",
+      	Port: 		2379,
+      	TargetPort: intstr.FromInt(2379),
+	}}
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout": "3600",
+		"external-dns.alpha.kubernetes.io/hostname": "etcd-china.tennis.us-east-1.general.prod.wildlife.io",
+		"external-dns.alpha.kubernetes.io/manage": "true",
+	}
+	service := &api.ServicePolicy {
+		Name: 		 "etcd-cluster-client",
+		Annotations: annotations,
+		Type: 		 v1.ServiceTypeLoadBalancer,
+		ClientPorts: ports,
+		ClusterIP: 	 v1.ClusterIPNone,
+	}
+	expectedPorts := ports
+	expectedAnnotations := annotations
+	expectedService := &api.ServicePolicy{
+		Name: 		 "etcd-cluster-client",
+		Type:      	 v1.ServiceTypeLoadBalancer,
+		ClientPorts: expectedPorts,
+		Annotations: expectedAnnotations,
+		ClusterIP:   v1.ClusterIPNone,
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		if publishNotReadyAddresses == true {
+			return fmt.Errorf("expected publishNotReadyAddresses to be %v, got=%v", false, publishNotReadyAddresses)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, service, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceLocalClusterDefinedServiceNoPorts(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "local"
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout": "3600",
+		"external-dns.alpha.kubernetes.io/hostname": "etcd-china.tennis.us-east-1.general.prod.wildlife.io",
+		"external-dns.alpha.kubernetes.io/manage": "true",
+	}
+	service := &api.ServicePolicy {
+		Name: 		 "etcd-cluster-client",
+		Annotations: annotations,
+		Type: 		 v1.ServiceTypeLoadBalancer,
+		ClusterIP: 	 v1.ClusterIPNone,
+	}
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+      	Port: 		2379,
+      	TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedAnnotations := annotations
+	expectedService := &api.ServicePolicy{
+		Name: 		 "etcd-cluster-client",
+		Type:      	 v1.ServiceTypeLoadBalancer,
+		Annotations: expectedAnnotations,
+		ClusterIP:   v1.ClusterIPNone,
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		if publishNotReadyAddresses == true {
+			return fmt.Errorf("expected publishNotReadyAddresses to be %v, got=%v", false, publishNotReadyAddresses)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, service, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceNoClusteringModeNilService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := ""
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedAnnotations := map[string]string{}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if service != nil{
+			return fmt.Errorf("expected service to be %v, got=%v", nil, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, nil, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceNoClusteringModeDefinedService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := ""
+	ports := []v1.ServicePort{{
+		Name:       "client",
+      	Port: 		2379,
+      	TargetPort: intstr.FromInt(2379),
+	}}
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout": "3600",
+		"external-dns.alpha.kubernetes.io/hostname": "etcd-china.tennis.us-east-1.general.prod.wildlife.io",
+		"external-dns.alpha.kubernetes.io/manage": "true",
+	}
+	service := &api.ServicePolicy {
+		Name: 		 "etcd-cluster-client",
+		Annotations: annotations,
+		Type: 		 v1.ServiceTypeLoadBalancer,
+		ClientPorts: ports,
+		ClusterIP: 	 v1.ClusterIPNone,
+	}
+	expectedPorts := ports
+	expectedAnnotations := annotations
+	expectedService := &api.ServicePolicy{
+		Name: 		 "etcd-cluster-client",
+		Type:      	 v1.ServiceTypeLoadBalancer,
+		ClientPorts: expectedPorts,
+		Annotations: expectedAnnotations,
+		ClusterIP:   v1.ClusterIPNone,
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		if publishNotReadyAddresses == true {
+			return fmt.Errorf("expected publishNotReadyAddresses to be %v, got=%v", false, publishNotReadyAddresses)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, service, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceDiscoveryClusterNilService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "discovery"
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+		Port:       2379,
+		TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedService := &api.ServicePolicy{
+		Type:      v1.ServiceTypeLoadBalancer,
+	}
+	expectedAnnotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",
+    	"service.beta.kubernetes.io/aws-load-balancer-type": "external",
+    	"service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing",
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, nil, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceDiscoveryClusterDefinedService(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "discovery"
+	ports := []v1.ServicePort{{
+		Name:       "client",
+      	Port: 		2379,
+      	TargetPort: intstr.FromInt(2379),
+	}}
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout": "3600",
+		"external-dns.alpha.kubernetes.io/hostname": "etcd-china.tennis.us-east-1.general.prod.wildlife.io",
+		"external-dns.alpha.kubernetes.io/manage": "true",
+	}
+	service := &api.ServicePolicy {
+		Name: 		 "etcd-cluster-client",
+		Annotations: annotations,
+		Type: 		 v1.ServiceTypeLoadBalancer,
+		ClientPorts: ports,
+		ClusterIP: 	 v1.ClusterIPNone,
+	}
+	expectedPorts := ports
+	expectedAnnotations := annotations
+	expectedService := &api.ServicePolicy{
+		Name: 		 "etcd-cluster-client",
+		Type:      	 v1.ServiceTypeLoadBalancer,
+		ClientPorts: expectedPorts,
+		Annotations: expectedAnnotations,
+		ClusterIP:   v1.ClusterIPNone,
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		if publishNotReadyAddresses == true {
+			return fmt.Errorf("expected publishNotReadyAddresses to be %v, got=%v", false, publishNotReadyAddresses)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, service, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
+	}
+}
+
+func TestCreateClientServiceDiscoveryClusterDefinedServiceNoPorts(t *testing.T) {
+	clusterName := "test-cluster"
+	serviceName := "test-cluster-client"
+	ns := "etcd"
+	owner := metav1.OwnerReference{}
+	ctx := context.TODO()
+	tls := false
+	clusteringMode := "discovery"
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout": "3600",
+		"external-dns.alpha.kubernetes.io/hostname": "etcd-china.tennis.us-east-1.general.prod.wildlife.io",
+		"external-dns.alpha.kubernetes.io/manage": "true",
+	}
+	service := &api.ServicePolicy {
+		Name: 		 "etcd-cluster-client",
+		Annotations: annotations,
+		Type: 		 v1.ServiceTypeLoadBalancer,
+		ClusterIP: 	 v1.ClusterIPNone,
+	}
+	expectedPorts := []v1.ServicePort{{
+		Name:       "http-client",
+      	Port: 		2379,
+      	TargetPort: intstr.FromInt(2379),
+		Protocol:   v1.ProtocolTCP,
+	}}
+	expectedAnnotations := annotations
+	expectedService := &api.ServicePolicy{
+		Name: 		 "etcd-cluster-client",
+		Type:      	 v1.ServiceTypeLoadBalancer,
+		Annotations: expectedAnnotations,
+		ClusterIP:   v1.ClusterIPNone,
+	}
+
+	createSvc := func(ctx context.Context, kubecli kubernetes.Interface, svcName string, clstrName string, ns string, ports []v1.ServicePort, owner metav1.OwnerReference, publishNotReadyAddresses bool, service *api.ServicePolicy, annotations map[string]string) error {		
+		if svcName != serviceName {
+			return fmt.Errorf("expected service name to be %s, got=%s", serviceName, svcName)
+		}
+		if clstrName != clusterName {
+			return fmt.Errorf("expected cluster name to be %s, got=%s", clusterName, clstrName)
+		}
+		if diff := cmp.Diff(expectedPorts, ports); diff != ""{
+			return fmt.Errorf("expected ports to be %v, got=%v", expectedPorts, ports)
+		}
+		if diff := cmp.Diff(expectedService, service); diff != ""{
+			return fmt.Errorf("expected service to be %v, got=%v", expectedService, service)
+		}
+		if diff := cmp.Diff(expectedAnnotations, annotations); diff != ""{
+			return fmt.Errorf("expected annotations to be %v, got=%v", expectedAnnotations, annotations)
+		}
+		if publishNotReadyAddresses == true {
+			return fmt.Errorf("expected publishNotReadyAddresses to be %v, got=%v", false, publishNotReadyAddresses)
+		}
+		return nil
+	}
+	
+	res := CreateClientService(ctx, nil, serviceName, clusterName, ns, owner, tls, service, clusteringMode, createSvc)
+
+	if res != nil {
+		t.Errorf("Got an error from tested function: %s", res.Error())
 	}
 }

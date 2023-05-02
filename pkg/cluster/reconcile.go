@@ -45,7 +45,7 @@ func (c *Cluster) reconcile(ctx context.Context, pods []*v1.Pod, services map[st
 
 	sp := c.cluster.Spec
 	if c.cluster.Spec.Services != nil {
-		c.reconcileServices(ctx, services)
+		c.reconcileServices(ctx, services, k8sutil.CreateSvc)
 		c.status.SetClusterServiceName(services)
 	}
 
@@ -120,7 +120,7 @@ func (c *Cluster) diffServices(services map[string]*v1.Service) ([]*api.ServiceP
 	return newServices, unknownServices, nil
 }
 
-func (c *Cluster) reconcileServices(ctx context.Context, services map[string]*v1.Service) error {
+func (c *Cluster) reconcileServices(ctx context.Context, services map[string]*v1.Service, createSvc k8sutil.CreateService) error {
 
 	newServices, unknownServices, err := c.diffServices(services)
 	if err != nil {
@@ -129,7 +129,7 @@ func (c *Cluster) reconcileServices(ctx context.Context, services map[string]*v1
 
 	if len(newServices) > 0 {
 		for _, service := range newServices {
-			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.GetName(), c.cluster.GetNamespace(), c.cluster.AsOwner(), c.isSecureClient(), service)
+			err := k8sutil.CreateClientService(ctx, c.config.KubeCli, service.Name, c.cluster.GetName(), c.cluster.GetNamespace(), c.cluster.AsOwner(), c.isSecureClient(), service, c.cluster.Spec.ClusteringMode, createSvc)
 			if err != nil {
 				return err
 			}

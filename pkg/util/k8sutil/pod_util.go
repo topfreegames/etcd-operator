@@ -81,7 +81,7 @@ func newEtcdProbe(isSecure, isTLSSecret bool) *v1.Probe {
 	return &v1.Probe{
 		Handler: v1.Handler{
 			Exec: &v1.ExecAction{
-				Command: []string{"/usr/local/bin/etcdctl", cmd},
+				Command: []string{fmt.Sprintf("/usr/local/bin/etcdctl %s", cmd)},
 			},
 		},
 		InitialDelaySeconds: 10,

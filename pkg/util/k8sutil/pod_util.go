@@ -70,18 +70,18 @@ func containerWithRequirements(c v1.Container, r v1.ResourceRequirements) v1.Con
 
 func newEtcdProbe(isSecure, isTLSSecret bool) *v1.Probe {
 	// etcd pod is healthy only if it can participate in consensus
-	cmd := "etcdctl endpoint status"
+	cmd := "endpoint status"
 	if isSecure {
 		tlsFlags := fmt.Sprintf("--cert=%[1]s/%[2]s --key=%[1]s/%[3]s --cacert=%[1]s/%[4]s", operatorEtcdTLSDir, etcdutil.CliCertFile, etcdutil.CliKeyFile, etcdutil.CliCAFile)
 		if isTLSSecret {
 			tlsFlags = fmt.Sprintf("--cert=%[1]s/%[2]s --key=%[1]s/%[3]s --cacert=%[1]s/%[4]s", operatorEtcdTLSDir, "tls.crt", "tls.key", "ca.crt")
 		}
-		cmd = fmt.Sprintf("etcdctl --endpoints=https://localhost:%d %s endpoint status", EtcdClientPort, tlsFlags)
+		cmd = fmt.Sprintf("--endpoints=https://localhost:%d %s endpoint status", EtcdClientPort, tlsFlags)
 	}
 	return &v1.Probe{
 		Handler: v1.Handler{
 			Exec: &v1.ExecAction{
-				Command: []string{"/usr/local/bin/", cmd},
+				Command: []string{"/usr/local/bin/etcdctl", cmd},
 			},
 		},
 		InitialDelaySeconds: 10,

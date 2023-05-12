@@ -429,26 +429,17 @@ func setupInitContainerCommand(cs api.ClusterSpec, m *etcdutil.Member, service v
 		DNSTimeout = cs.Pod.DNSTimeoutInSecond
 	}
 	
+	host := ""
 	if cs.ClusteringMode == "discovery" {
 		serviceUrl, err := getServiceHostname(service)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf(`
-		TIMEOUT_READY=%d
-		while ( ! nslookup %s )
-		do
-			# If TIMEOUT_READY is 0 we should never time out and exit
-			TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
-			if [ $TIMEOUT_READY -eq 0 ];
-			then
-				echo "Timed out waiting for DNS entry"
-				exit 1
-			fi
-			sleep 1
-		done`, DNSTimeout, serviceUrl), nil
+		host = serviceUrl
 	} else {
-		return fmt.Sprintf(`
+		host = m.Addr()
+	}
+	return fmt.Sprintf(`
 		TIMEOUT_READY=%d
 		while ( ! nslookup %s )
 		do
@@ -460,8 +451,7 @@ func setupInitContainerCommand(cs api.ClusterSpec, m *etcdutil.Member, service v
 				exit 1
 			fi
 			sleep 1
-		done`, DNSTimeout, m.Addr()), nil
-	}
+		done`, DNSTimeout, host), nil
 }
 
 func getServiceHostname(service v1.Service) (string, error) {

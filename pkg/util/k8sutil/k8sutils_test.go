@@ -82,6 +82,89 @@ func TestEtcdCommandNewLocalCluster(t *testing.T) {
 	}
 }
 
+func TestInitContainerLocalCluster(t *testing.T) {
+	etcdMember := &etcdutil.Member{
+		Name:          "etcd-cluster-test",
+		Namespace:     "etcd",
+		SecurePeer:    false,
+		SecureClient:  false,
+		ClusterDomain: ".local",
+	}
+	clusterSpec := api.ClusterSpec{
+		Size:           1,
+		ClusteringMode: "local",
+		ClusterToken:   "testtoken",
+	}
+	service := v1.Service{}
+
+	initContainerCommand, _ := setupInitContainerCommand(clusterSpec, etcdMember, service)
+
+	expectedCommand := `
+		TIMEOUT_READY=0
+		while ( ! nslookup etcd-cluster-test.etcd-cluster.etcd.svc.local )
+		do
+			# If TIMEOUT_READY is 0 we should never time out and exit
+			TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
+			if [ $TIMEOUT_READY -eq 0 ];
+			then
+				echo "Timed out waiting for DNS entry"
+				exit 1
+			fi
+			sleep 1
+		done`
+
+	if initContainerCommand != expectedCommand {
+		t.Errorf("expected command=%s, got=%s", expectedCommand, initContainerCommand)
+	}
+}
+
+func TestInitContainerDiscoveryCluster(t *testing.T) {
+	etcdMember := &etcdutil.Member{
+		Name:          "etcd-cluster-test",
+		Namespace:     "etcd",
+		SecurePeer:    false,
+		SecureClient:  false,
+		ClusterDomain: ".local",
+	}
+	clusterSpec := api.ClusterSpec{
+		Size:           1,
+		ClusteringMode: "discovery",
+		ClusterToken:   "testtoken",
+	}
+	hostname := v1.LoadBalancerIngress{
+		Hostname: "etcd-peer",
+	}
+	service := v1.Service{
+		Status: v1.ServiceStatus{
+			LoadBalancer: v1.LoadBalancerStatus{
+				Ingress: []v1.LoadBalancerIngress{hostname},
+			},
+		},
+	}
+
+	initContainerCommand, _ := setupInitContainerCommand(clusterSpec, etcdMember, service)
+
+	expectedCommand := `
+		TIMEOUT_READY=0
+		while ( ! nslookup etcd-peer )
+		do
+			# If TIMEOUT_READY is 0 we should never time out and exit
+			TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
+			if [ $TIMEOUT_READY -eq 0 ];
+			then
+				echo "Timed out waiting for DNS entry"
+				exit 1
+			fi
+			sleep 1
+		done`
+
+	if initContainerCommand != expectedCommand {
+		t.Errorf("expected command=%s, got=%s", expectedCommand, initContainerCommand)
+	}
+}
+
+//ToDo: possible failure scenarios for init container command setup
+
 //TODO
 func TestEtcdCommandExistingLocalCluster(t *testing.T) {
 	dataDir := "/var/etcd/data"

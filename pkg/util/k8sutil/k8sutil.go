@@ -423,12 +423,51 @@ func setupClientServiceURL(endpoint string) string {
 	return fmt.Sprintf("http://%s:2379", endpoint)
 }
 
+func setupInitContainerCommand(cs api.ClusterSpec, m *etcdutil.Member, service v1.Service) (string, error) {
+	DNSTimeout := defaultDNSTimeout
+	if cs.Pod != nil {
+		DNSTimeout = cs.Pod.DNSTimeoutInSecond
+	}
+	
+	host := ""
+	if cs.ClusteringMode == "discovery" {
+		serviceUrl, err := getServiceHostname(service)
+		if err != nil {
+			return "", err
+		}
+		host = serviceUrl
+	} else {
+		host = m.Addr()
+	}
+	return fmt.Sprintf(`
+		TIMEOUT_READY=%d
+		while ( ! nslookup %s )
+		do
+			# If TIMEOUT_READY is 0 we should never time out and exit
+			TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
+			if [ $TIMEOUT_READY -eq 0 ];
+			then
+				echo "Timed out waiting for DNS entry"
+				exit 1
+			fi
+			sleep 1
+		done`, DNSTimeout, host), nil
+}
+
+func getServiceHostname(service v1.Service) (string, error) {
+	fmt.Printf("Services url list: %v", service.Status.LoadBalancer.Ingress)
+	svcUrl := service.Status.LoadBalancer.Ingress[0].Hostname
+	if svcUrl == "" {
+		return "", fmt.Errorf("failed to get service url: %v", service)
+	} else {
+		return svcUrl, nil
+	}
+}
 func setupEtcdCommand(dataDir string, m *etcdutil.Member, initialCluster string, clusterState string, clusterToken string, clusteringMode string, service v1.Service) (string, error) {
 	if clusteringMode == "discovery" {
-		fmt.Printf("Services url list: %v", service.Status.LoadBalancer.Ingress)
-		serviceUrl := service.Status.LoadBalancer.Ingress[0].Hostname
-		if serviceUrl == "" {
-			return "", fmt.Errorf("failed to get service url: %v", service)
+		serviceUrl, err := getServiceHostname(service)
+		if err != nil {
+			return "", err
 		}
 		command := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
 			"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
@@ -543,9 +582,9 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 		}})
 	}
 
-	DNSTimeout := defaultDNSTimeout
-	if cs.Pod != nil {
-		DNSTimeout = cs.Pod.DNSTimeoutInSecond
+	initContainerCommand, err := setupInitContainerCommand(cs, m, service)
+	if err != nil {
+		return nil, err
 	}
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -563,19 +602,7 @@ func newEtcdPod(ctx context.Context, kubecli kubernetes.Interface, m *etcdutil.M
 				// In etcd 3.2, TLS listener will do a reverse-DNS lookup for pod IP -> hostname.
 				// If DNS entry is not warmed up, it will return empty result and peer connection will be rejected.
 				// In some cases the DNS is not created correctly so we need to time out after a given period.
-				Command: []string{"/bin/sh", "-c", fmt.Sprintf(`
-					TIMEOUT_READY=%d
-					while ( ! nslookup %s )
-					do
-						# If TIMEOUT_READY is 0 we should never time out and exit
-						TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
-                        if [ $TIMEOUT_READY -eq 0 ];
-				        then
-				            echo "Timed out waiting for DNS entry"
-				            exit 1
-				        fi
-						sleep 1
-					done`, DNSTimeout, m.Addr())},
+				Command: []string{"/bin/sh", "-c", initContainerCommand},
 			}},
 			Containers:    []v1.Container{container},
 			RestartPolicy: v1.RestartPolicyNever,

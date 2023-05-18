@@ -111,3 +111,8 @@ func ClusterWithVersion(cl *api.EtcdCluster, version string) *api.EtcdCluster {
 func NameLabelSelector(name string) map[string]string {
 	return map[string]string{"name": name}
 }
+
+func ClusterWithRepo(cl *api.EtcdCluster, repo string) *api.EtcdCluster {
+	cl.Spec.Repository = repo
+	return cl
+}

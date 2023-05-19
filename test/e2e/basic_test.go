@@ -65,7 +65,7 @@ func TestCreateClusterDiscovery(t *testing.T) {
 		t.Parallel()
 	}
 	f := framework.Global
-	cluster := e2eutil.NewCluster("test-etcd-", 3)
+	cluster := e2eutil.NewCluster("test-etcd-", 1)
 	cluster = e2eutil.ClusterWithVersion(cluster, "v3.5.7")
 	cluster = e2eutil.ClusterWithRepo(cluster, "quay.io/coreos/etcd")
 	token := getDiscoveryToken(t)

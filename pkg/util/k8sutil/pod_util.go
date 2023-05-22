@@ -71,15 +71,22 @@ func containerWithRequirements(c v1.Container, r v1.ResourceRequirements) v1.Con
 func newEtcdProbe(isSecure, isTLSSecret bool) *v1.Probe {
 	// etcd pod is healthy only if it can participate in consensus
 	var cmd []string
+	var certFile string
+	var keyFile string
+	var cacertFile string
 	cmd = append(cmd, "etcdctl")
 	if isSecure {
 		cmd = append(cmd, fmt.Sprintf("--endpoints=https://localhost:%d", EtcdClientPort))
 		if isTLSSecret {
-			cmd = append(cmd, fmt.Sprintf("--cert=%s/%s", operatorEtcdTLSDir, "tls.crt"), fmt.Sprintf("--key=%s/%s", operatorEtcdTLSDir, "tls.key"), fmt.Sprintf("--cacert=%s/%s", operatorEtcdTLSDir, "ca.crt"))
+			certFile = "tls.crt"
+    		keyFile = "tls.key"
+			cacertFile = "ca.crt"
 		} else {
-			cmd = append(cmd, fmt.Sprintf("--cert=%s/%s", operatorEtcdTLSDir, etcdutil.CliCertFile), fmt.Sprintf("--key=%s/%s", operatorEtcdTLSDir, etcdutil.CliKeyFile), fmt.Sprintf("--cacert=%s/%s", operatorEtcdTLSDir, etcdutil.CliCAFile))
+			certFile = etcdutil.CliCertFile
+			keyFile = etcdutil.CliKeyFile
+			cacertFile = etcdutil.CliCAFile
 		}
-
+		cmd = append(cmd, fmt.Sprintf("--cert=%s/%s", operatorEtcdTLSDir, certFile), fmt.Sprintf("--key=%s/%s", operatorEtcdTLSDir, keyFile), fmt.Sprintf("--cacert=%s/%s", operatorEtcdTLSDir, cacertFile))
 	}
 	cmd = append(cmd, "endpoint", "status")
 	return &v1.Probe{

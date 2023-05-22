@@ -19,8 +19,6 @@ import (
 	"os"
 	"testing"
 	"time"
-	// "net/http"
-	// "io/ioutil"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/test/e2e/e2eutil"

@@ -48,6 +48,30 @@ func TestCreateCluster(t *testing.T) {
 	}
 }
 
+func TestCreateClusterDistrolessVersion(t *testing.T) {
+	if os.Getenv(envParallelTest) == envParallelTestTrue {
+		t.Parallel()
+	}
+	f := framework.Global
+	origEtcd := e2eutil.NewCluster("test-etcd-", 3)
+	origEtcd = e2eutil.ClusterWithVersion(origEtcd, "v3.5.7")
+	origEtcd = e2eutil.ClusterWithRepo(origEtcd, "quay.io/coreos/etcd")
+	testEtcd, err := e2eutil.CreateCluster(t, context.Background(), f.CRClient, f.Namespace, origEtcd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := e2eutil.DeleteCluster(t, context.Background(), f.CRClient, f.KubeClient, testEtcd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	if _, err := e2eutil.WaitUntilSizeReached(t, context.Background(), f.CRClient, 3, f.RetryAttempts, testEtcd); err != nil {
+		t.Fatalf("failed to create 3 members etcd cluster: %v", err)
+	}
+}
+
 // Test not used cause the testing cluster doesn't have aws lb controller, which this version uses
 // func getDiscoveryToken(t *testing.T) string {
 // 	resp, err := http.Get("https://discovery.etcd.io/new?size=1")

@@ -34,7 +34,7 @@ See the [Resources and Labels](./doc/user/resource_labels.md) doc for an overvie
 ## Requirements
 
 - Kubernetes 1.8+
-- etcd 3.2.13+
+- etcd 3.3+
 
 ## Demo
 
@@ -126,7 +126,7 @@ metadata:
   name: "example-etcd-cluster"
 spec:
   size: 3
-  version: "v3.2.13"
+  version: "v3.4.19"
 ```
 ```
 $ kubectl apply -f example/example-etcd-cluster.yaml

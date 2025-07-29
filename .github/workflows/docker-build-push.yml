@@ -1,9 +1,12 @@
 name: Publish new Docker image
 
 on:
-  release:
-    types: [published]
-
+  push:
+    tags:
+      - '*'
+  pull_request:
+    branches: [ main ]
+    
 jobs:
 
   docker-build-amd64:
@@ -45,6 +48,8 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          TARGETARCH=amd64
         cache-from: type=gha,scope=amd64
         cache-to: type=gha,mode=max,scope=amd64
         provenance: false
@@ -89,6 +94,8 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          TARGETARCH=arm64
         cache-from: type=gha,scope=arm64
         cache-to: type=gha,mode=max,scope=arm64
         provenance: false
@@ -121,9 +128,9 @@ jobs:
       with:
         images: tfgco/${{ github.event.repository.name }}
         tags: |
-          type=ref,event=tag
           type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
+        flavor: |
+          latest=false
 
     - name: Create and push multi-arch manifest
       run: |
